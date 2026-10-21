@@ -21,6 +21,7 @@ import {
   type ConfiguredSnoozePreset,
 } from "./lifecycle";
 import { beginTitleGeneration, finishTitleGeneration, useTitleGenerating } from "./title-generation-state";
+import { openSubthreadComposer } from "./subthread-composer-state";
 
 /**
  * This sidebar's own right-click menu.
@@ -65,6 +66,7 @@ export function RowContextMenu({
   const rpc = useRpc<typeof bbSidebarRpcContract>();
   const regenerating = useTitleGenerating(thread.id);
   const renameAfterClose = useRef(false);
+  const subthreadAfterClose = useRef(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   // Archive takes the children with it, and bb leaves every idle one's agent
   // session loaded. Release them alongside the archive. Working children are
@@ -125,6 +127,13 @@ export function RowContextMenu({
             onCloseAutoFocus?.(event);
             // The delete dialog takes focus next; do not pull it back to the row.
             if (confirmingDelete) event.preventDefault();
+            if (subthreadAfterClose.current) {
+              subthreadAfterClose.current = false;
+              // The composer takes focus next; do not pull it back to the row.
+              event.preventDefault();
+              openSubthreadComposer(thread.id);
+              return;
+            }
             if (!renameAfterClose.current) return;
             renameAfterClose.current = false;
             // Hand focus to the editor after the menu releases its focus scope.
@@ -135,6 +144,9 @@ export function RowContextMenu({
         >
           <Item onSelect={() => actions.open(thread.id, { split: true })}>
             Open in split
+          </Item>
+          <Item onSelect={() => { subthreadAfterClose.current = true; }}>
+            New subthread
           </Item>
           <ParentThreadMenu thread={thread} />
           {projectItems ? (

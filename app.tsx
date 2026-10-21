@@ -1,12 +1,31 @@
 // BB Sidebar: a shelved, manually ordered replacement for bb's thread list.
 // Manual order stays fixed until the user moves a row. Optional views can sort
 // by activity, creation date, or project without changing the saved order.
-import { definePluginApp } from "@get-bb/plugin-sdk/app";
+import {
+  definePluginApp,
+  type PluginCommandPaletteActionRegistration,
+} from "@get-bb/plugin-sdk/app";
 import "./src/theme.css";
 import { ThreadInbox } from "./src/ThreadInbox";
 import { ParentChip } from "./src/ParentChip";
 import { SubagentsChip } from "./src/SubagentsChip";
 import { SidebarSettings } from "./src/SidebarSettings";
+import { SubthreadComposer } from "./src/SubthreadComposer";
+import { openSubthreadComposer } from "./src/subthread-composer-state";
+
+// bb reads `defaultShortcut` from palette commands (Command on macOS, Control
+// elsewhere for `mod`); the pinned SDK's declarations predate the field.
+const newSubthreadCommand: PluginCommandPaletteActionRegistration & {
+  defaultShortcut: { key: string; mod?: boolean; alt?: boolean; shift?: boolean };
+} = {
+  id: "new-subthread",
+  title: "New subthread",
+  defaultShortcut: { key: "n", mod: true, alt: true },
+  isAvailable: ({ threadId }) => threadId !== null,
+  run: ({ threadId }) => {
+    if (threadId !== null) openSubthreadComposer(threadId);
+  },
+};
 
 export default definePluginApp((app) => {
   app.slots.settingsSection({
@@ -40,4 +59,11 @@ export default definePluginApp((app) => {
     title: "Child threads",
     component: SubagentsChip,
   });
+
+  // One composer per window, shared by the row menu and the command.
+  app.slots.experimental_appOverlay({
+    id: "subthread-composer",
+    component: SubthreadComposer,
+  });
+  app.slots.commandPaletteAction(newSubthreadCommand);
 });

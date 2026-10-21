@@ -4,7 +4,7 @@
 // Putting it on the thread would mean a schema change, a wire change, and a
 // HOST_DAEMON_PROTOCOL_VERSION bump for something only this sidebar
 // understands. Here, uninstalling the plugin removes its state with it.
-import { defineRpcContract, type BbPluginApi } from "@get-bb/plugin-sdk";
+import { defineRpcContract, type BbPluginApi, type NewThreadRequest } from "@get-bb/plugin-sdk";
 import { z } from "zod";
 import {
   autoSettleNeedsPullRequest,
@@ -227,6 +227,26 @@ export const bbSidebarRpcContract = defineRpcContract({
   setThreadParent: {
     input: threadIdSchema.extend({ parentThreadId: z.string().trim().min(1).nullable() }).strict(),
     output: z.object({ ok: z.boolean() }),
+  },
+  getSubthreadDefaults: {
+    input: threadIdSchema.strict(),
+    output: z.object({
+      model: z.string(),
+      reasoningLevel: z.custom<NewThreadRequest["reasoningLevel"]>((value) => typeof value === "string"),
+      serviceTier: z.enum(["default", "fast"]),
+      permissionMode: z.enum(["accept-edits", "auto", "full"]),
+    }).strict().nullable(),
+  },
+  createSubthread: {
+    input: z.object({
+      parentThreadId: z.string().trim().min(1),
+      // The host composer builds this; threads.spawn validates every field.
+      request: z.custom<NewThreadRequest>(
+        (value) => typeof value === "object" && value !== null && !Array.isArray(value),
+        "Invalid thread request",
+      ),
+    }).strict(),
+    output: z.object({ threadId: z.string() }).strict(),
   },
   deleteThread: {
     input: threadIdSchema.extend({ childThreadsConfirmed: z.boolean() }).strict(),
@@ -1219,6 +1239,21 @@ export default async function plugin(bb: BbPluginApi) {
       // BB validates parent relationships, including cycles.
       await bb.sdk.threads.update({ threadId, parentThreadId });
       return { ok: true };
+    },
+    async getSubthreadDefaults({ threadId }) {
+      const options = await bb.sdk.threads.defaultExecutionOptions({ threadId });
+      return options
+        ? {
+          model: options.model,
+          reasoningLevel: options.reasoningLevel,
+          serviceTier: options.serviceTier,
+          permissionMode: options.permissionMode,
+        }
+        : null;
+    },
+    async createSubthread({ parentThreadId, request }) {
+      const thread = await bb.sdk.threads.spawn({ ...request, parentThreadId });
+      return { threadId: thread.id };
     },
     async deleteThread({ threadId, childThreadsConfirmed }) {
       // The sidebar shows its own confirmation naming the thread and project,

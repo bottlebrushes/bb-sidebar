@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- **New subthread** in a thread's context menu, and as a command bound to Cmd+Option+N (Ctrl+Alt+N off Mac) for the open thread, opens bb's new-thread composer filed under that thread. It starts from the parent's project, model, permission mode and environment; any of them can be changed before sending. Rebind it in Keyboard Settings.
+
 ## [0.2.26] - 2026-09-29
 
 ### Added

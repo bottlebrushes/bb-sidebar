@@ -48,3 +48,5 @@ The sidebar design and interactions are directly inspired by [T3 Code](https://g
 Park threads while waiting on someone else. Use **Park thread** in the context menu and **Resume** when ready. Parked threads have no timer and are excluded from automatic cleanup. Opening one leaves it parked; new thread activity brings it back to Active.
 
 Use **Parent** in a thread's context menu to search threads in the same project, choose a parent, or select **None** to remove it. The current parent is checked; the thread itself and its descendants are excluded.
+
+Use **New subthread** in a thread's context menu, or press Cmd+Option+N (Ctrl+Alt+N off Mac) in an open thread, to start a child thread under it. The composer starts from the parent's project, model, permission mode and environment, and every choice can be changed before sending. The shortcut can be rebound in Keyboard Settings.
