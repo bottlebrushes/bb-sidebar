@@ -23,6 +23,14 @@ import {
 import { beginTitleGeneration, finishTitleGeneration, useTitleGenerating } from "./title-generation-state";
 import { openSubthreadComposer } from "./subthread-composer-state";
 
+// Mute state is owned by the Chime (Notifications & Sounds) plugin. Muting a
+// thread silences it and every descendant; the item is hidden when Chime is
+// not installed.
+const CHIME_HTTP = "/api/v1/plugins/chime/http";
+const MUTE_CHANGED_EVENT = "chime:thread-mute-changed";
+
+type MuteState = { muted: boolean; inheritedFrom: string | null };
+
 /**
  * This sidebar's own right-click menu.
  *
@@ -62,12 +70,40 @@ export function RowContextMenu({
   const actions = useSidebarThreadActions();
   const { projects, threads } = useSidebarThreads();
   const project = projects.find((project) => project.id === thread.projectId);
+  // The sidebar may file a thread under another project; bb still owns the
+  // one it was created in, which links and resets use.
+  const homeProjectId =
+    threads.find((candidate) => candidate.id === thread.id)?.projectId ??
+    thread.projectId;
   const portalScope = usePortalScopeProps();
   const rpc = useRpc<typeof bbSidebarRpcContract>();
   const regenerating = useTitleGenerating(thread.id);
   const renameAfterClose = useRef(false);
   const subthreadAfterClose = useRef(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [mute, setMute] = useState<MuteState | null>(null);
+  const loadMute = (open: boolean) => {
+    if (!open) return;
+    setMute(null);
+    void fetch(`${CHIME_HTTP}/thread-mute?threadId=${encodeURIComponent(thread.id)}`)
+      .then((response) => (response.ok ? response.json() as Promise<MuteState> : null))
+      .then(setMute, () => setMute(null));
+  };
+  const toggleMute = async (muted: boolean) => {
+    try {
+      const response = await fetch(`${CHIME_HTTP}/mute`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ threadId: thread.id, muted }),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      window.dispatchEvent(new Event(MUTE_CHANGED_EVENT));
+    } catch (error) {
+      toast.error(muted ? "Could not mute thread" : "Could not unmute thread", {
+        description: error instanceof Error ? error.message : undefined,
+      });
+    }
+  };
   // Archive takes the children with it, and bb leaves every idle one's agent
   // session loaded. Release them alongside the archive. Working children are
   // skipped, so this never interrupts a turn archive itself would not.
@@ -117,7 +153,7 @@ export function RowContextMenu({
     <>
     <ProjectActions project={project}>
     {({ items: projectItems, onOpenChange, onCloseAutoFocus }) => (
-    <ContextMenu.Root>
+    <ContextMenu.Root onOpenChange={loadMute}>
       <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
       <ContextMenu.Portal>
         <ContextMenu.Content
@@ -164,10 +200,18 @@ export function RowContextMenu({
               </ContextMenu.Portal>
             </ContextMenu.Sub>
           ) : null}
+          <ProjectPlacementSubmenu thread={thread} homeProjectId={homeProjectId} />
           <Separator />
           <Item icon={thread.isPinned ? "PinOff" : "Pin"} onSelect={() => void togglePin()}>
             {thread.isPinned ? "Unpin" : "Pin"}
           </Item>
+          {mute === null ? null : mute.muted ? (
+            <Item icon="Notification" onSelect={() => void toggleMute(false)}>Unmute notifications</Item>
+          ) : mute.inheritedFrom !== null ? (
+            <Item icon="NotificationOff" disabled onSelect={() => {}}>Muted by parent thread</Item>
+          ) : (
+            <Item icon="NotificationOff" onSelect={() => void toggleMute(true)}>Mute notifications</Item>
+          )}
           {onPark ? <Item icon="Car" onSelect={onPark}>Park thread</Item> : null}
           {onResume ? <Item icon="Pulse" onSelect={onResume}>Resume</Item> : null}
           {onSettle ? <Item icon="Meditation" onSelect={onSettle}>Settle</Item> : null}
@@ -191,7 +235,7 @@ export function RowContextMenu({
             {thread.isUnread ? "Mark read" : "Mark unread"}
           </Item>
           <Separator />
-          <CopySubmenu thread={thread} />
+          <CopySubmenu thread={thread} homeProjectId={homeProjectId} />
           <Separator />
           <Item
             disabled={!canArchive}
@@ -212,7 +256,86 @@ export function RowContextMenu({
   );
 }
 
-function CopySubmenu({ thread }: { thread: PluginSidebarThread }) {
+function ProjectPlacementSubmenu({
+  thread,
+  homeProjectId,
+}: {
+  thread: PluginSidebarThread;
+  homeProjectId: string;
+}) {
+  const { projects } = useSidebarThreads();
+  const portalScope = usePortalScopeProps();
+  const rpc = useRpc<typeof bbSidebarRpcContract>();
+  if (projects.length < 2) return null;
+  const ordered = [...projects].sort(
+    (left, right) =>
+      Number(right.isPersonal) - Number(left.isPersonal) ||
+      left.name.localeCompare(right.name),
+  );
+  const place = async (projectId: string) => {
+    try {
+      await rpc.call("setThreadProject", {
+        threadId: thread.id,
+        projectId: projectId === homeProjectId ? null : projectId,
+      });
+    } catch (error) {
+      toast.error("Could not move thread", {
+        description: error instanceof Error ? error.message : undefined,
+      });
+    }
+  };
+  return (
+    <ContextMenu.Sub>
+      <ContextMenu.SubTrigger
+        className={cn(
+          "flex cursor-pointer items-center rounded-md px-2 py-1.5 text-sm outline-none",
+          "data-[state=open]:bg-accent data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground",
+        )}
+      >
+        Sort under
+        <Icon name="ChevronRight" className="ml-auto size-4 opacity-60" />
+      </ContextMenu.SubTrigger>
+      <ContextMenu.Portal>
+        <ContextMenu.SubContent
+          {...portalScope}
+          aria-label="Sort under project"
+          sideOffset={4}
+          className="z-50 max-h-80 min-w-44 overflow-y-auto rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-md"
+        >
+          {ordered.map((candidate) => (
+            <Item
+              key={candidate.id}
+              title={
+                candidate.id === homeProjectId
+                  ? "The project this thread was created in"
+                  : undefined
+              }
+              onSelect={() => void place(candidate.id)}
+            >
+              <Icon
+                name="Check"
+                className={cn(
+                  "size-3.5 shrink-0 text-muted-foreground",
+                  candidate.id !== thread.projectId && "invisible",
+                )}
+                aria-hidden="true"
+              />
+              <span className="truncate">{candidate.name}</span>
+            </Item>
+          ))}
+        </ContextMenu.SubContent>
+      </ContextMenu.Portal>
+    </ContextMenu.Sub>
+  );
+}
+
+function CopySubmenu({
+  thread,
+  homeProjectId,
+}: {
+  thread: PluginSidebarThread;
+  homeProjectId: string;
+}) {
   const { projects } = useSidebarThreads();
   const portalScope = usePortalScopeProps();
   const branchName = thread.environment?.branchName;
@@ -222,12 +345,12 @@ function CopySubmenu({ thread }: { thread: PluginSidebarThread }) {
   };
   const copyThreadLink = async () => {
     const isPersonal = projects.some(
-      (project) => project.id === thread.projectId && project.isPersonal,
+      (project) => project.id === homeProjectId && project.isPersonal,
     );
     const threadPath = `/threads/${encodeURIComponent(thread.id)}`;
     const path = isPersonal
       ? threadPath
-      : `/projects/${encodeURIComponent(thread.projectId)}${threadPath}`;
+      : `/projects/${encodeURIComponent(homeProjectId)}${threadPath}`;
     try {
       await navigator.clipboard.writeText(new URL(path, window.location.origin).href);
       toast.success("Thread link copied");

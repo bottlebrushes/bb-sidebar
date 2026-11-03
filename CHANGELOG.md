@@ -5,6 +5,9 @@
 ### Added
 
 - **New subthread** in a thread's context menu, and as a command bound to Cmd+Option+N (Ctrl+Alt+N off Mac) for the open thread, opens bb's new-thread composer filed under that thread. It starts from the parent's project, model, permission mode and environment; any of them can be changed before sending. Rebind it in Keyboard Settings.
+- **Mute notifications** / **Unmute notifications** in a thread's context menu, when the Chime (Notifications & Sounds) plugin is installed. A muted thread and all of its descendants stop sending sounds, banners, and push notifications; a descendant shows **Muted by parent thread** instead.
+- **`bb bb-sidebar settle | unsettle | status [threadId]`**, a CLI for the shelves that defaults to the thread running it. An idle thread settles at once. A working thread (an agent settling itself) settles when its turn ends, so its runtime is not stopped mid-turn and the turn's end does not wake it again; a failed turn or any manual shelf choice drops the waiting settle.
+- **Sort under** in a thread's context menu files the thread under another project in this sidebar: its card label, project grouping, and project filter follow the choice. bb cannot move a thread between projects, so this helps when a thread's work moved to another checkout. Links still use the project bb created the thread in, and choosing that project again clears the placement.
 
 ## [0.2.26] - 2026-09-29
 

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   createFakePluginHost,
   makeThreadResponse,
+  type FakePluginHarness,
 } from "@get-bb/plugin-sdk/testing";
 import plugin, { type StoredLifecycleRow } from "./server";
 
@@ -1019,6 +1020,64 @@ describe("project management", () => {
   });
 });
 
+describe("thread project placement", () => {
+  it("files a thread under another project until it is reset or deleted", async () => {
+    const project = standardProject();
+    const { bb, harness } = createFakePluginHost({
+      pluginId: "bb-sidebar",
+      sdk: {
+        threads: {
+          get: async ({ threadId }) =>
+            makeThreadResponse({ id: threadId, projectId: "proj_personal" }),
+        },
+        projects: {
+          get: async ({ projectId }) => {
+            if (projectId !== project.id) throw new Error("Project not found");
+            return project;
+          },
+        },
+      },
+    });
+    await plugin(bb);
+    disposers.push(() => harness.lifecycle.dispose());
+
+    await expect(
+      harness.behavior.callRpc("setThreadProject", {
+        threadId: "thr_1",
+        projectId: "proj_missing",
+      }),
+    ).rejects.toThrow("Project not found");
+    await harness.behavior.callRpc("setThreadProject", {
+      threadId: "thr_1",
+      projectId: "proj_1",
+    });
+    await harness.behavior.callRpc("setThreadProject", {
+      threadId: "thr_2",
+      projectId: "proj_1",
+    });
+    await expect(
+      harness.behavior.callRpc("listThreadProjects", {}),
+    ).resolves.toEqual({
+      rows: [
+        { threadId: "thr_1", projectId: "proj_1" },
+        { threadId: "thr_2", projectId: "proj_1" },
+      ],
+    });
+
+    // Choosing the project bb created the thread in drops the placement.
+    await harness.behavior.callRpc("setThreadProject", {
+      threadId: "thr_1",
+      projectId: "proj_personal",
+    });
+    await harness.behavior.emitThreadEvent("thread.deleted", {
+      thread: makeThreadResponse({ id: "thr_2" }),
+    });
+    await expect(
+      harness.behavior.callRpc("listThreadProjects", {}),
+    ).resolves.toEqual({ rows: [] });
+  });
+});
+
 describe("automatic settle evaluation", () => {
   it("settles inactive threads and publishes one batched refresh", async () => {
     const old = Date.now() - 4 * 24 * 60 * 60 * 1_000;
@@ -1324,6 +1383,71 @@ describe("parked lifecycle", () => {
     await harness.behavior.callRpc("park", { threadId: "thr_1" });
     await harness.behavior.emitThreadEvent("thread.active", { thread: makeThreadResponse({ id: "thr_1" }) });
     expect(await harness.behavior.callRpc("listLifecycle", {})).toEqual({ rows: [] });
+  });
+});
+
+describe("settle CLI", () => {
+  async function loadWithThread(status: "active" | "idle") {
+    const harness = await loadPlugin();
+    harness.inspection.sdk.stub("threads.get", async ({ threadId }) =>
+      makeThreadResponse({ id: threadId, status, latestAttentionAt: 1_000 }),
+    );
+    harness.inspection.sdk.stub("threads.stop", async () => ({ ok: true as const }));
+    return harness;
+  }
+
+  const settledRow = async (harness: FakePluginHarness) =>
+    ((await harness.behavior.callRpc("listLifecycle", {})) as LifecycleListResult)
+      .rows.find((row) => row.threadId === "thr_1" && row.settledAt !== null);
+
+  it("settles an idle thread at once, defaulting to the invoking thread", async () => {
+    const harness = await loadWithThread("idle");
+    const result = await harness.behavior.runCli(["settle"], { threadId: "thr_1" });
+    expect(result).toMatchObject({ exitCode: 0, stdout: "Settled thr_1." });
+    expect(await settledRow(harness)).toMatchObject({ settledOverride: "settled" });
+  });
+
+  it("waits for a working thread's turn to end, then settles after its attention", async () => {
+    const harness = await loadWithThread("active");
+    const result = await harness.behavior.runCli(["settle", "thr_1"]);
+    expect(result.stdout).toContain("settles when its current turn ends");
+    // Settling stops the runtime, so nothing may happen mid-turn.
+    expect(await settledRow(harness)).toBeUndefined();
+    expect(harness.inspection.sdk.callsTo("threads.stop")).toEqual([]);
+
+    const turnEnd = Date.now() + 60_000;
+    await harness.behavior.emitThreadEvent("thread.idle", {
+      thread: makeThreadResponse({ id: "thr_1", latestAttentionAt: turnEnd }),
+      lastAssistantText: null,
+    });
+    await expect.poll(() => settledRow(harness)).toMatchObject({
+      settledAt: turnEnd,
+      settledOverride: "settled",
+    });
+    expect(harness.inspection.sdk.callsTo("threads.stop")).toEqual([
+      [{ threadId: "thr_1" }],
+    ]);
+  });
+
+  it("drops a waiting settle when the turn fails or the user picks a shelf", async () => {
+    const harness = await loadWithThread("active");
+    await harness.behavior.runCli(["settle", "thr_1"]);
+    await harness.behavior.emitThreadEvent("thread.failed", {
+      thread: makeThreadResponse({ id: "thr_1" }),
+      error: null,
+    });
+    await harness.behavior.runCli(["settle", "thr_2"]);
+    await harness.behavior.callRpc("unsettle", { threadId: "thr_2" });
+    for (const id of ["thr_1", "thr_2"]) {
+      await harness.behavior.emitThreadEvent("thread.idle", {
+        thread: makeThreadResponse({ id }),
+        lastAssistantText: null,
+      });
+    }
+    expect(await settledRow(harness)).toBeUndefined();
+    expect(await harness.behavior.runCli(["status", "thr_2"])).toMatchObject({
+      stdout: "thr_2: inbox",
+    });
   });
 });
 

@@ -21,7 +21,9 @@ A stable thread list for [bb](https://github.com/get-bb/bb). Threads stay where 
 - Configurable inactive-thread and automatic cleanup rules
 - Native bb navigation, split, rename, archive, and delete flows
 - Project submenu on thread cards for settings, rename, local paths, and removal
+- Sort under submenu on thread cards to file a thread under another project in the sidebar
 - Regenerate a thread title from its last three accepted user messages
+- `bb bb-sidebar settle | unsettle | status [threadId]` for agents and scripts; an agent settling its own working thread settles it when the turn ends
 
 ## Install
 

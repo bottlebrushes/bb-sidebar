@@ -19,6 +19,7 @@ import {
   threadDisplayTitle,
   visibleInboxThreads,
 } from "./inbox";
+import { placeThreadsInProjects } from "./thread-projects";
 
 function thread(
   overrides: Partial<PluginSidebarThread> = {},
@@ -205,6 +206,23 @@ describe("filtering", () => {
     ];
     expect(filterByProject(threads, "p1").map((t) => t.id)).toEqual(["a"]);
     expect(filterByProject(threads, null)).toHaveLength(2);
+  });
+
+  it("scopes a placed thread under its chosen project, unless that project is gone", () => {
+    const threads = [
+      thread({ id: "moved", projectId: "personal" }),
+      thread({ id: "stale", projectId: "personal" }),
+    ];
+    const placed = placeThreadsInProjects(
+      threads,
+      new Map([
+        ["moved", "p1"],
+        ["stale", "removed"],
+      ]),
+      [{ id: "personal" }, { id: "p1" }],
+    );
+    expect(filterByProject(placed, "p1").map((t) => t.id)).toEqual(["moved"]);
+    expect(filterByProject(placed, "personal").map((t) => t.id)).toEqual(["stale"]);
   });
 
   it("drops archived threads", () => {

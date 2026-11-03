@@ -43,6 +43,7 @@ import { createThreadPortActions } from "./thread-ports";
 import { createThreadPullRequests } from "./thread-pull-requests";
 import { threadPullRequestSchema } from "./pull-requests";
 import { ownedPortTargetSchema, closePortsResultSchema } from "./close-owned-ports";
+import { THREAD_PROJECTS_CHANNEL } from "./thread-projects";
 
 const migrations = [
   `CREATE TABLE IF NOT EXISTS thread_lifecycle (
@@ -92,7 +93,33 @@ const migrations = [
      ADD COLUMN child_sort_direction TEXT NOT NULL DEFAULT 'ascending'`,
   `ALTER TABLE sidebar_settings
      ADD COLUMN child_icon_style TEXT NOT NULL DEFAULT 'disc'`,
+  // A settle asked for while the thread is still working (an agent settling
+  // its own thread mid-turn). It runs when the thread goes idle: settling
+  // stops the runtime, and the turn's own end must not count as new
+  // attention that un-settles it.
+  `CREATE TABLE IF NOT EXISTS pending_settles (
+     thread_id     TEXT PRIMARY KEY,
+     requested_at  INTEGER NOT NULL
+   )`,
+  // The project a thread is filed under in this sidebar, when it differs
+  // from the project bb created it in. bb cannot move a thread between
+  // projects, so this only changes where the sidebar sorts it.
+  `CREATE TABLE IF NOT EXISTS thread_projects (
+     thread_id   TEXT PRIMARY KEY,
+     project_id  TEXT NOT NULL
+   )`,
 ];
+
+const CLI_USAGE = `Usage: bb bb-sidebar <command> [threadId]
+
+Commands:
+  settle [threadId]    Move a thread to the Settled shelf. A thread that is
+                       still working (an agent settling itself) settles when
+                       its current turn ends.
+  unsettle [threadId]  Put a thread back in the inbox.
+  status [threadId]    Show the stored shelf state of a thread.
+
+threadId defaults to the thread running the command.`;
 
 export interface StoredLifecycleRow {
   threadId: string;
@@ -424,6 +451,24 @@ export const bbSidebarRpcContract = defineRpcContract({
         customUploadName: z.string().nullable(),
       })
       .strict(),
+  },
+  listThreadProjects: {
+    input: z.object({}).strict(),
+    output: z.object({
+      rows: z.array(
+        z.object({ threadId: z.string(), projectId: z.string() }).strict(),
+      ),
+    }),
+  },
+  setThreadProject: {
+    input: z
+      .object({
+        threadId: z.string().trim().min(1),
+        // Null files the thread under its own project again.
+        projectId: projectIdSchema.nullable(),
+      })
+      .strict(),
+    output: z.object({ ok: z.literal(true) }).strict(),
   },
 });
 
@@ -1208,6 +1253,46 @@ export default async function plugin(bb: BbPluginApi) {
     await evaluatePolicies();
   });
 
+  // Any explicit shelf choice supersedes a settle waiting for the turn's end.
+  const dropPendingSettle = (threadId: string): boolean =>
+    db.prepare(`DELETE FROM pending_settles WHERE thread_id = ?`).run(threadId)
+      .changes > 0;
+
+  const settleThread = async (
+    threadId: string,
+    settledAt: number,
+  ): Promise<ReclaimSummary> => {
+    dropPendingSettle(threadId);
+    // Native pinning and this plugin's settled shelf are competing ways to
+    // keep a thread out of the ordinary inbox. Settling wins, and a failed
+    // unpin leaves the lifecycle row untouched instead of half-applying it.
+    await bb.sdk.threads.unpin({ threadId });
+    // Settling clears any snooze: they are two answers to the same
+    // question, and holding both would make the shelf order ambiguous.
+    write({
+      threadId,
+      settledAt,
+      settledOverride: "settled",
+      snoozedUntil: null,
+      snoozedAt: null,
+    });
+    // The shelf move is durable before anything is released, so a slow or
+    // unreachable host delays the reminder without holding up the settle.
+    return reclaimThreadResources(threadId);
+  };
+
+  const unsettleThread = (threadId: string): void => {
+    dropPendingSettle(threadId);
+    const current = readOne(threadId);
+    write({
+      threadId,
+      settledAt: null,
+      settledOverride: "active",
+      snoozedUntil: current?.snoozedUntil ?? null,
+      snoozedAt: current?.snoozedAt ?? null,
+    });
+  };
+
   bb.rpc.register(bbSidebarRpcContract, {
     getOpenPorts,
     getThreadPorts: threadPortActions.getThreadPorts,
@@ -1280,6 +1365,7 @@ export default async function plugin(bb: BbPluginApi) {
       return { rows: readAll() };
     },
     async pin({ threadId }) {
+      dropPendingSettle(threadId);
       // Preserve the previous shelf if the native pin fails.
       await bb.sdk.threads.pin({ threadId });
       write({
@@ -1293,6 +1379,7 @@ export default async function plugin(bb: BbPluginApi) {
       return { ok: true };
     },
     async park({ threadId }) {
+      dropPendingSettle(threadId);
       await bb.sdk.threads.unpin({ threadId });
       write({
         threadId,
@@ -1305,6 +1392,7 @@ export default async function plugin(bb: BbPluginApi) {
       return { ok: true, reclaim: await reclaimThreadResources(threadId) };
     },
     async resume({ threadId }) {
+      dropPendingSettle(threadId);
       write({
         threadId,
         settledAt: null,
@@ -1315,36 +1403,14 @@ export default async function plugin(bb: BbPluginApi) {
       return { ok: true };
     },
     async settle({ threadId }) {
-      // Native pinning and this plugin's settled shelf are competing ways to
-      // keep a thread out of the ordinary inbox. Settling wins, and a failed
-      // unpin leaves the lifecycle row untouched instead of half-applying it.
-      await bb.sdk.threads.unpin({ threadId });
-      // Settling clears any snooze: they are two answers to the same
-      // question, and holding both would make the shelf order ambiguous.
-      const now = Date.now();
-      write({
-        threadId,
-        settledAt: now,
-        settledOverride: "settled",
-        snoozedUntil: null,
-        snoozedAt: null,
-      });
-      // The shelf move is durable before anything is released, so a slow or
-      // unreachable host delays the reminder without holding up the settle.
-      return { ok: true, reclaim: await reclaimThreadResources(threadId) };
+      return { ok: true, reclaim: await settleThread(threadId, Date.now()) };
     },
     async unsettle({ threadId }) {
-      const current = readOne(threadId);
-      write({
-        threadId,
-        settledAt: null,
-        settledOverride: "active",
-        snoozedUntil: current?.snoozedUntil ?? null,
-        snoozedAt: current?.snoozedAt ?? null,
-      });
+      unsettleThread(threadId);
       return { ok: true };
     },
     async snooze({ threadId, snoozedUntil }) {
+      dropPendingSettle(threadId);
       await bb.sdk.threads.unpin({ threadId });
       const now = Date.now();
       write({
@@ -1474,10 +1540,14 @@ export default async function plugin(bb: BbPluginApi) {
         db.prepare(
           `DELETE FROM project_icon_uploads WHERE project_id = ?`,
         ).run(projectId);
+        db.prepare(`DELETE FROM thread_projects WHERE project_id = ?`).run(
+          projectId,
+        );
       })();
       defaultProjectHostIds.delete(projectId);
       clearProjectIconCache(projectId);
       bb.realtime.publish(PROJECT_ICONS_CHANNEL, { projectId });
+      bb.realtime.publish(THREAD_PROJECTS_CHANNEL, {});
       return { ok: true as const };
     },
     async searchProjectIconFiles({ projectId, query }) {
@@ -1585,6 +1655,31 @@ export default async function plugin(bb: BbPluginApi) {
         customUploadName: normalizedFilename,
       };
     },
+    async listThreadProjects() {
+      return {
+        rows: db
+          .prepare(
+            `SELECT thread_id AS threadId, project_id AS projectId FROM thread_projects`,
+          )
+          .all() as Array<{ threadId: string; projectId: string }>,
+      };
+    },
+    async setThreadProject({ threadId, projectId }) {
+      const thread = await bb.sdk.threads.get({ threadId });
+      if (projectId === null || projectId === thread.projectId) {
+        db.prepare(`DELETE FROM thread_projects WHERE thread_id = ?`).run(
+          threadId,
+        );
+      } else {
+        await bb.sdk.projects.get({ projectId });
+        db.prepare(
+          `INSERT INTO thread_projects (thread_id, project_id) VALUES (?, ?)
+           ON CONFLICT(thread_id) DO UPDATE SET project_id = excluded.project_id`,
+        ).run(threadId, projectId);
+      }
+      bb.realtime.publish(THREAD_PROJECTS_CHANNEL, { threadId });
+      return { ok: true as const };
+    },
   });
 
   // Real work clears both kinds of manual settle override. The next quiet
@@ -1597,11 +1692,132 @@ export default async function plugin(bb: BbPluginApi) {
   // thread reusing the id, and stale rows accumulate otherwise.
   bb.events.on("thread.deleted", ({ thread }) => {
     clear(thread.id);
+    dropPendingSettle(thread.id);
+    if (
+      db.prepare(`DELETE FROM thread_projects WHERE thread_id = ?`).run(thread.id)
+        .changes > 0
+    ) {
+      bb.realtime.publish(THREAD_PROJECTS_CHANNEL, { threadId: thread.id });
+    }
     const removed = db
       .prepare(`DELETE FROM inbox_order WHERE thread_id = ?`)
       .run(thread.id);
     if (removed.changes > 0) {
       bb.realtime.publish(INBOX_ORDER_CHANNEL, {});
     }
+  });
+
+  // A pending settle lands once the turn is over. It is stamped no earlier
+  // than the attention the turn's end just recorded, or the shelf would read
+  // that as new attention and put the thread straight back in the inbox.
+  bb.events.on("thread.idle", ({ thread }) => {
+    if (!dropPendingSettle(thread.id)) return;
+    void settleThread(
+      thread.id,
+      Math.max(Date.now(), thread.latestAttentionAt),
+    ).catch((error) => {
+      bb.log.error(
+        `Pending settle of ${thread.id} failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    });
+  });
+
+  // A failed turn needs a look, so a settle waiting on it is dropped.
+  bb.events.on("thread.failed", ({ thread }) => {
+    dropPendingSettle(thread.id);
+  });
+
+  bb.cli.register({
+    name: "bb-sidebar",
+    summary: "Settle or unsettle threads on the BB Sidebar's shelves",
+    commands: [
+      {
+        name: "settle",
+        summary:
+          "Settle a thread (defaults to the current one); a working thread settles when its turn ends",
+        usage: "bb bb-sidebar settle [threadId]",
+      },
+      {
+        name: "unsettle",
+        summary: "Put a settled thread back in the inbox",
+        usage: "bb bb-sidebar unsettle [threadId]",
+      },
+      {
+        name: "status",
+        summary: "Show the stored shelf state of a thread",
+        usage: "bb bb-sidebar status [threadId]",
+      },
+    ],
+    async run(argv, ctx) {
+      const [command, ...rest] = argv;
+      if (!command || command === "help" || command === "--help") {
+        return { exitCode: 0, stdout: CLI_USAGE };
+      }
+      if (!["settle", "unsettle", "status"].includes(command)) {
+        return {
+          exitCode: 2,
+          stderr: `unknown command '${command}'\n\n${CLI_USAGE}`,
+        };
+      }
+      if (rest.includes("--help")) return { exitCode: 0, stdout: CLI_USAGE };
+      const unknown = rest.find((arg) => arg.startsWith("-"));
+      if (unknown || rest.length > 1) {
+        return {
+          exitCode: 2,
+          stderr: `${unknown ? `unknown option '${unknown}'` : "too many arguments"}\n\n${CLI_USAGE}`,
+        };
+      }
+      const threadId = rest[0] ?? ctx.threadId;
+      if (!threadId) {
+        return {
+          exitCode: 2,
+          stderr: `no thread: run it from a thread or pass one, e.g. bb bb-sidebar ${command} thr_abc123`,
+        };
+      }
+
+      if (command === "unsettle") {
+        unsettleThread(threadId);
+        return { exitCode: 0, stdout: `Unsettled ${threadId}.` };
+      }
+      if (command === "status") {
+        const pending = db
+          .prepare(`SELECT 1 FROM pending_settles WHERE thread_id = ?`)
+          .get(threadId);
+        const row = readOne(threadId);
+        const state = pending
+          ? "settles when its current turn ends"
+          : row?.parkedAt != null
+            ? `parked at ${new Date(row.parkedAt).toISOString()}`
+            : row?.snoozedUntil != null
+              ? `snoozed until ${new Date(row.snoozedUntil).toISOString()}`
+              : row?.settledAt != null
+                ? `settled at ${new Date(row.settledAt).toISOString()}`
+                : "inbox";
+        return { exitCode: 0, stdout: `${threadId}: ${state}` };
+      }
+
+      let thread;
+      try {
+        thread = await bb.sdk.threads.get({ threadId });
+      } catch {
+        return { exitCode: 1, stderr: `thread ${threadId} not found` };
+      }
+      if (thread.status === "idle" || thread.status === "error") {
+        await settleThread(
+          threadId,
+          Math.max(Date.now(), thread.latestAttentionAt),
+        );
+        return { exitCode: 0, stdout: `Settled ${threadId}.` };
+      }
+      // Settling now would stop the runtime this very turn is running on.
+      db.prepare(
+        `INSERT INTO pending_settles (thread_id, requested_at) VALUES (?, ?)
+         ON CONFLICT(thread_id) DO UPDATE SET requested_at = excluded.requested_at`,
+      ).run(threadId, Date.now());
+      return {
+        exitCode: 0,
+        stdout: `${threadId} is still working: it settles when its current turn ends.`,
+      };
+    },
   });
 }

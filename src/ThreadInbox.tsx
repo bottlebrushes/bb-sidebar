@@ -44,6 +44,8 @@ import { TRAILING_GLYPH_BOX_CLASS } from "./StatusSlot";
 import { WorkingSinceContext, useWorkingSince } from "./useWorkingSince";
 import { JumpHintsContext, useJumpHints } from "./JumpHints";
 import { useSidebarSettings } from "./useSidebarSettings";
+import { useThreadProjects } from "./useThreadProjects";
+import { placeThreadsInProjects } from "./thread-projects";
 import { OpenPortsProvider } from "./OpenPorts";
 import {
   ALL_PROJECTS,
@@ -394,7 +396,12 @@ export function ThreadInbox({
   onNavigate,
   searchQuery,
 }: PluginThreadListProps) {
-  const { status, threads, projects } = useSidebarThreads();
+  const { status, threads: hostThreads, projects } = useSidebarThreads();
+  const threadProjects = useThreadProjects();
+  const threads = useMemo(
+    () => placeThreadsInProjects(hostThreads, threadProjects, projects),
+    [hostThreads, projects, threadProjects],
+  );
   const workingSince = useWorkingSince(threads);
   const { providers } = useProviders();
   const actions = useSidebarThreadActions();
