@@ -6,7 +6,7 @@ import type { PluginSidebarThread } from "@get-bb/plugin-sdk/app";
 import { Icon } from "../../components/Icon";
 import { cn } from "../../lib/utils";
 import { StatusGlyph } from "../../StatusGlyph";
-import { useThreadIndicator } from "../../HostWaking";
+import { useThreadIndicator } from "../../RuntimeOverlays";
 import type { BoardCard, BoardColumn } from "../contract";
 import type { ColumnCategory } from "../model";
 

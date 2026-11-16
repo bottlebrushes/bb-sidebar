@@ -1,4 +1,4 @@
-import type { SidebarIndicator } from "./HostWaking";
+import type { SidebarIndicator } from "./RuntimeOverlays";
 import { Icon } from "./components/Icon";
 import { cn } from "./lib/utils";
 import { statusToneClass } from "./StatusSlot";
@@ -30,6 +30,7 @@ export function hasStatusGlyph(
 ): boolean {
   switch (indicator) {
     case "unread-error":
+    case "stalled":
     case "waiting-for-input":
     case "unread-success":
     case "runtime":
@@ -61,6 +62,7 @@ export function StatusGlyph({
 
   switch (indicator) {
     case "unread-error":
+    case "stalled":
       return (
         <Icon
           name="CircleX"

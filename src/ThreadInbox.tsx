@@ -47,7 +47,7 @@ import { useSidebarSettings } from "./useSidebarSettings";
 import { useThreadProjects } from "./useThreadProjects";
 import { placeThreadsInProjects } from "./thread-projects";
 import { OpenPortsProvider } from "./OpenPorts";
-import { HostWakingProvider } from "./HostWaking";
+import { RuntimeOverlayProvider } from "./RuntimeOverlays";
 import {
   ALL_PROJECTS,
   filterByProject,
@@ -1174,7 +1174,7 @@ export function ThreadInbox({
     <WorkingSinceContext.Provider value={workingSince}>
     <ChildThreadDisplayContext.Provider value={childDisplay}>
     <OpenPortsProvider>
-    <HostWakingProvider>
+    <RuntimeOverlayProvider>
     <JumpHintsContext.Provider value={jumpHints}>
       <div ref={jumpHintsRootRef} className="flex min-h-0 flex-1 flex-col">
         {/* The one control the host has no equivalent for. Everything else in
@@ -1427,7 +1427,7 @@ export function ThreadInbox({
         </div>
       </div>
     </JumpHintsContext.Provider>
-    </HostWakingProvider>
+    </RuntimeOverlayProvider>
     </OpenPortsProvider>
     </ChildThreadDisplayContext.Provider>
     </WorkingSinceContext.Provider>

@@ -10,7 +10,7 @@ import { StatusGlyph } from "../../StatusGlyph";
 import { ChildThreadBadge, ChildThreadList, collapsedChildThreads } from "../../ChildThreadList";
 import { ParkButton } from "../../ThreadCard";
 import type { BoardCard } from "../contract";
-import { useThreadIndicator } from "../../HostWaking";
+import { useThreadIndicator } from "../../RuntimeOverlays";
 import type { LayoutCard } from "../layout";
 import { SubCardBadge, SubCardList, type SubCardLookup } from "./SubCardList";
 

@@ -1,5 +1,5 @@
 import type { PluginSidebarThread } from "@get-bb/plugin-sdk/app";
-import { hostWakingLabel, useHostWaking, type SidebarIndicator } from "./HostWaking";
+import { overlayIndicator, overlayLabel, useRuntimeOverlay, type SidebarIndicator } from "./RuntimeOverlays";
 import { cn } from "./lib/utils";
 import { relativeTimeLabel } from "./relative-time";
 import { useWorkingSinceContext } from "./useWorkingSince";
@@ -42,18 +42,18 @@ export function StatusOrTime({
   now: number;
 }) {
   const workingSince = useWorkingSinceContext();
-  const waking = useHostWaking(thread.id);
-  const status =
-    waking && !thread.hasPendingInteraction
-      ? shortStatus("host-waking", null)
-      : threadShortStatus(thread);
+  const runtimeOverlay = useRuntimeOverlay(thread.id);
+  const overlay = thread.hasPendingInteraction ? undefined : runtimeOverlay;
+  const status = overlay
+    ? shortStatus(overlayIndicator(overlay), null)
+    : threadShortStatus(thread);
   if (status !== null) {
     const label = shortStatusLabel(status, workingSince.get(thread.id), now);
     return (
       <span
         aria-label={
-          waking && !thread.hasPendingInteraction
-            ? hostWakingLabel(waking)
+          overlay
+            ? overlayLabel(overlay)
             : thread.hasPendingInteraction ? label : (thread.indicatorLabel ?? label)
         }
         className={cn(
@@ -114,6 +114,8 @@ export function shortStatus(
       return { label: "Drafting", className, showsDuration: true };
     case "host-waking":
       return { label: "Resuming", className, showsDuration: false };
+    case "stalled":
+      return { label: "Stuck", className, showsDuration: false };
     case "none":
       return null;
     default:
@@ -163,6 +165,7 @@ export function statusToneClass(
 ): string {
   switch (indicator) {
     case "unread-error":
+    case "stalled":
       return "text-[color:var(--bb-sidebar-tone-error)]";
     case "waiting-for-input":
       return "text-[color:var(--bb-sidebar-tone-pending)]";
