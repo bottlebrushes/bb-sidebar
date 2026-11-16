@@ -5,6 +5,7 @@ import { Tooltip } from "./components/Tooltip";
 import { Disc } from "./Disc";
 import { cn } from "./lib/utils";
 import { StatusGlyph } from "./StatusGlyph";
+import { hostWakingLabel, useHostWaking } from "./HostWaking";
 import {
   STATUS_SLOT_CLASS,
   StatusOrTime,
@@ -421,6 +422,7 @@ function ChildThreadRow({
   const needsYou = thread.hasPendingInteraction;
   const effectiveNow = now ?? Date.now();
   const workingSince = useWorkingSinceContext();
+  const waking = useHostWaking(thread.id);
   const visibleStatus = threadStatusLabel(
     thread,
     workingSince.get(thread.id),
@@ -509,8 +511,8 @@ function ChildThreadRow({
             {variant === "header" ? (
               <span className="shrink-0">
                 <StatusGlyph
-                  indicator={thread.indicator}
-                  label={thread.indicatorLabel}
+                  indicator={waking ? "host-waking" : thread.indicator}
+                  label={waking ? hostWakingLabel(waking) : thread.indicatorLabel}
                 />
               </span>
             ) : null}

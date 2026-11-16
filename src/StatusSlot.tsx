@@ -1,7 +1,5 @@
-import type {
-  PluginSidebarThread,
-  PluginSidebarThreadIndicator,
-} from "@get-bb/plugin-sdk/app";
+import type { PluginSidebarThread } from "@get-bb/plugin-sdk/app";
+import { hostWakingLabel, useHostWaking, type SidebarIndicator } from "./HostWaking";
 import { cn } from "./lib/utils";
 import { relativeTimeLabel } from "./relative-time";
 import { useWorkingSinceContext } from "./useWorkingSince";
@@ -44,13 +42,19 @@ export function StatusOrTime({
   now: number;
 }) {
   const workingSince = useWorkingSinceContext();
-  const status = threadShortStatus(thread);
+  const waking = useHostWaking(thread.id);
+  const status =
+    waking && !thread.hasPendingInteraction
+      ? shortStatus("host-waking", null)
+      : threadShortStatus(thread);
   if (status !== null) {
     const label = shortStatusLabel(status, workingSince.get(thread.id), now);
     return (
       <span
         aria-label={
-          thread.hasPendingInteraction ? label : (thread.indicatorLabel ?? label)
+          waking && !thread.hasPendingInteraction
+            ? hostWakingLabel(waking)
+            : thread.hasPendingInteraction ? label : (thread.indicatorLabel ?? label)
         }
         className={cn(
           "max-w-full truncate text-2xs font-medium",
@@ -77,7 +81,7 @@ export interface ShortStatus {
 }
 
 export function shortStatus(
-  indicator: PluginSidebarThreadIndicator,
+  indicator: SidebarIndicator,
   indicatorLabel: string | null,
 ): ShortStatus | null {
   const className = statusToneClass(indicator);
@@ -108,6 +112,8 @@ export function shortStatus(
       return { label: "Draft", className, showsDuration: false };
     case "working-draft":
       return { label: "Drafting", className, showsDuration: true };
+    case "host-waking":
+      return { label: "Resuming", className, showsDuration: false };
     case "none":
       return null;
     default:
@@ -153,7 +159,7 @@ function isMonitoringLabel(label: string | null): boolean {
 
 /** Status palette shared by cards, child labels, and glyphs. */
 export function statusToneClass(
-  indicator: PluginSidebarThreadIndicator,
+  indicator: SidebarIndicator,
 ): string {
   switch (indicator) {
     case "unread-error":
@@ -172,6 +178,8 @@ export function statusToneClass(
     case "draft":
     case "working-draft":
       return "text-[color:var(--bb-sidebar-tone-draft)]";
+    case "host-waking":
+      return "text-[color:var(--bb-sidebar-tone-host)]";
     case "none":
     default:
       return "text-muted-foreground";

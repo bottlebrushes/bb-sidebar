@@ -1,4 +1,4 @@
-import type { PluginSidebarThreadIndicator } from "@get-bb/plugin-sdk";
+import type { SidebarIndicator } from "./HostWaking";
 import { Icon } from "./components/Icon";
 import { cn } from "./lib/utils";
 import { statusToneClass } from "./StatusSlot";
@@ -26,7 +26,7 @@ import { statusToneClass } from "./StatusSlot";
  * the slot.
  */
 export function hasStatusGlyph(
-  indicator: PluginSidebarThreadIndicator,
+  indicator: SidebarIndicator,
 ): boolean {
   switch (indicator) {
     case "unread-error":
@@ -36,6 +36,7 @@ export function hasStatusGlyph(
     case "workflow":
     case "background-agent":
     case "background-command":
+    case "host-waking":
     case "plan-mode":
     case "goal":
     case "draft":
@@ -51,7 +52,7 @@ export function StatusGlyph({
   label,
   className,
 }: {
-  indicator: PluginSidebarThreadIndicator;
+  indicator: SidebarIndicator;
   label: string | null;
   className?: string;
 }) {
@@ -111,6 +112,16 @@ export function StatusGlyph({
           className={cn(shared, statusToneClass(indicator))}
         />
       );
+    case "host-waking":
+      // The background command's pulse on a power icon: something is coming
+      // up, not running. Yellow keeps it apart from the blue working glyphs.
+      return (
+        <ShineIcon
+          name="Power"
+          label={aria}
+          className={cn(shared, statusToneClass(indicator))}
+        />
+      );
     case "plan-mode":
       return (
         <ShineIcon
@@ -164,7 +175,7 @@ function ShineIcon({
   label,
   className,
 }: {
-  name: "Workflow" | "UserRoundPlus" | "Terminal" | "ListTodo" | "Target";
+  name: "Workflow" | "UserRoundPlus" | "Terminal" | "ListTodo" | "Target" | "Power";
   label: string | undefined;
   className: string;
 }) {

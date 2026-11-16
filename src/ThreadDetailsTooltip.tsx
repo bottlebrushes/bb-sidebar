@@ -13,6 +13,7 @@ import { threadDisplayTitle } from "./inbox";
 import { Icon, type IconName } from "./components/Icon";
 import { ProviderGlyph } from "./ProviderGlyph";
 import { StatusGlyph } from "./StatusGlyph";
+import { hostWakingLabel, useHostWaking } from "./HostWaking";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { PROJECT_ICONS_CHANNEL, projectIconUrl } from "./project-icons";
 import { OpenPortDetails } from "./OpenPorts";
@@ -66,7 +67,11 @@ export function ThreadDetailsTooltip({
   const isWorktree =
     thread.environment?.workspaceDisplayKind === "managed-worktree" ||
     thread.environment?.workspaceDisplayKind === "unmanaged-worktree";
-  const status = thread.hasPendingInteraction ? "Needs you" : thread.indicatorLabel ?? "Idle";
+  const waking = useHostWaking(thread.id);
+  const status = thread.hasPendingInteraction
+    ? "Needs you"
+    : waking ? hostWakingLabel(waking) : thread.indicatorLabel ?? "Idle";
+  const indicator = !thread.hasPendingInteraction && waking ? "host-waking" : thread.indicator;
   const subthreads = visible ? threads
     .filter((child) => !child.isArchived && child.parentThreadId === thread.id && child.id !== thread.id)
     .sort(compareChildThreads(childSort)) : [];
@@ -96,9 +101,9 @@ export function ThreadDetailsTooltip({
         <div className="flex items-start gap-2">
           <span className="relative mt-px flex size-3.5 shrink-0 items-center justify-center">
             <ProviderGlyph providerId={thread.providerId} provider={provider ?? null} className="size-3.5 [&_span]:size-3.5" />
-            {thread.indicator !== "none" ? (
+            {indicator !== "none" ? (
               <span className="absolute -bottom-1 -right-1 rounded-full bg-popover">
-                <StatusGlyph indicator={thread.indicator} label={status} className="size-2.5" />
+                <StatusGlyph indicator={indicator} label={status} className="size-2.5" />
               </span>
             ) : null}
           </span>

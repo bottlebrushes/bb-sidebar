@@ -10,6 +10,7 @@ import { StatusGlyph } from "../../StatusGlyph";
 import { ChildThreadBadge, ChildThreadList, collapsedChildThreads } from "../../ChildThreadList";
 import { ParkButton } from "../../ThreadCard";
 import type { BoardCard } from "../contract";
+import { useThreadIndicator } from "../../HostWaking";
 import type { LayoutCard } from "../layout";
 import { SubCardBadge, SubCardList, type SubCardLookup } from "./SubCardList";
 
@@ -99,9 +100,7 @@ export function BoardCardView({
   onDragEnd(): void;
 }) {
   const { card, thread, blockers, blocking, parent, subItems, duplicates, duplicateOf, coveredBy } = item;
-  const coveringIndicator = coveredBy?.thread
-    ? (coveredBy.thread.hasPendingInteraction ? "waiting-for-input" : coveredBy.thread.indicator)
-    : null;
+  const coveringIndicator = useThreadIndicator(coveredBy?.thread);
   const [showSubItems, setShowSubItems] = useState(false);
   const subListId = useId();
   const [showDuplicates, setShowDuplicates] = useState(false);
@@ -119,7 +118,7 @@ export function BoardCardView({
     .map((part) => part[0]!.toUpperCase())
     .join("");
   const blocked = blockers.length > 0;
-  const indicator = thread ? (thread.hasPendingInteraction ? "waiting-for-input" : thread.indicator) : null;
+  const indicator = useThreadIndicator(thread);
 
   return (
     <CardMenu item={item} onAction={onAction}>

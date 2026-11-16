@@ -6,6 +6,7 @@ import type { PluginSidebarThread } from "@get-bb/plugin-sdk/app";
 import { Icon } from "../../components/Icon";
 import { cn } from "../../lib/utils";
 import { StatusGlyph } from "../../StatusGlyph";
+import { useThreadIndicator } from "../../HostWaking";
 import type { BoardCard, BoardColumn } from "../contract";
 import type { ColumnCategory } from "../model";
 
@@ -101,7 +102,7 @@ function SubCardRow({ card, lookup, depth }: { card: BoardCard; lookup: SubCardL
   const [expanded, setExpanded] = useState(false);
   const column = lookup.columnOf(card);
   const thread = lookup.threadOf(card);
-  const indicator = thread ? (thread.hasPendingInteraction ? "waiting-for-input" : thread.indicator) : null;
+  const indicator = useThreadIndicator(thread);
   const nested = lookup.subCardsOf(card.id);
   const label = `${card.linear ? `${card.linear.identifier} ` : ""}${card.title}`;
   return (
