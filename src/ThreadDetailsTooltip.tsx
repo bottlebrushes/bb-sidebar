@@ -13,7 +13,7 @@ import { threadDisplayTitle } from "./inbox";
 import { Icon, type IconName } from "./components/Icon";
 import { ProviderGlyph } from "./ProviderGlyph";
 import { StatusGlyph } from "./StatusGlyph";
-import { overlayIndicator, overlayLabel, useRuntimeOverlay } from "./RuntimeOverlays";
+import { useThreadOverlay } from "./RuntimeOverlays";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { PROJECT_ICONS_CHANNEL, projectIconUrl } from "./project-icons";
 import { OpenPortDetails } from "./OpenPorts";
@@ -67,11 +67,11 @@ export function ThreadDetailsTooltip({
   const isWorktree =
     thread.environment?.workspaceDisplayKind === "managed-worktree" ||
     thread.environment?.workspaceDisplayKind === "unmanaged-worktree";
-  const overlay = useRuntimeOverlay(thread.id);
+  const overlay = useThreadOverlay(thread);
   const status = thread.hasPendingInteraction
     ? "Needs you"
-    : overlay ? overlayLabel(overlay) : thread.indicatorLabel ?? "Idle";
-  const indicator = !thread.hasPendingInteraction && overlay ? overlayIndicator(overlay) : thread.indicator;
+    : overlay?.label ?? thread.indicatorLabel ?? "Idle";
+  const indicator = overlay?.indicator ?? thread.indicator;
   const subthreads = visible ? threads
     .filter((child) => !child.isArchived && child.parentThreadId === thread.id && child.id !== thread.id)
     .sort(compareChildThreads(childSort)) : [];

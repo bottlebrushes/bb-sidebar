@@ -1,52 +1,63 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { useRpc, type PluginSidebarThread, type PluginSidebarThreadIndicator } from "@get-bb/plugin-sdk/app";
 import type { bbSidebarRpcContract } from "./server";
-import type { RuntimeOverlay } from "./runtime-overlays";
+import {
+  resolveOverlay,
+  type PausedHostPhase,
+  type RuntimeOverlaySnapshot,
+  type ThreadOverlay,
+  type ThreadState,
+} from "./runtime-overlays";
 
 /**
- * bb's indicators plus this plugin's own, overlaid from the thread's runtime
- * (see runtime-overlays.ts): waiting on its machine, or a queue that stopped
- * draining.
+ * bb's indicators plus this plugin's own, overlaid from thread runtimes and
+ * machine lifecycles (see runtime-overlays.ts): waiting on its machine, or a
+ * queue that stopped draining.
  */
 export type SidebarIndicator = PluginSidebarThreadIndicator | "host-waking" | "stalled";
 
-type OverlayMap = ReadonlyMap<string, RuntimeOverlay>;
-
-const RuntimeOverlayContext = createContext<OverlayMap>(new Map());
-
-function sameOverlays(left: OverlayMap, right: OverlayMap): boolean {
-  if (left.size !== right.size) return false;
-  for (const [threadId, entry] of left) {
-    const other = right.get(threadId);
-    if (other?.kind !== entry.kind || other.graceExpiresAt !== entry.graceExpiresAt) return false;
-  }
-  return true;
+interface Overlays {
+  threads: ReadonlyMap<string, ThreadState>;
+  hosts: ReadonlyMap<string, PausedHostPhase>;
+  /** The server's answer, compared to skip rerendering on an unchanged poll. */
+  key: string;
 }
+
+const EMPTY: Overlays = { threads: new Map(), hosts: new Map(), key: "" };
+
+const RuntimeOverlayContext = createContext<Overlays>(EMPTY);
 
 /** A reconnect resolves in seconds, so this polls faster than the port scan. */
 const POLL_MS = 5_000;
 
+function toOverlays(snapshot: RuntimeOverlaySnapshot): Overlays {
+  return {
+    threads: new Map(snapshot.threads.map((entry) => [entry.threadId, entry])),
+    hosts: new Map(snapshot.hosts.map((entry) => [entry.hostId, entry.phase])),
+    key: JSON.stringify(snapshot),
+  };
+}
+
 export function RuntimeOverlayProvider({ children }: { children: ReactNode }) {
   const rpc = useRpc<typeof bbSidebarRpcContract>();
-  const [overlays, setOverlays] = useState<OverlayMap>(new Map());
+  const [overlays, setOverlays] = useState<Overlays>(EMPTY);
 
   useEffect(() => {
     let disposed = false;
     let inFlight = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const isHidden = () => document.visibilityState === "hidden";
-    function publish(next: OverlayMap) {
-      if (!disposed) setOverlays((previous) => (sameOverlays(previous, next) ? previous : next));
+    function publish(next: Overlays) {
+      if (!disposed) setOverlays((previous) => (previous.key === next.key ? previous : next));
     }
     async function refresh() {
       if (disposed || inFlight || isHidden()) return;
       inFlight = true;
       try {
-        const snapshot = await rpc.call("getRuntimeOverlays", {});
-        publish(new Map(snapshot.threads.map((entry) => [entry.threadId, entry])));
+        publish(toOverlays(await rpc.call("getRuntimeOverlays", {})));
       } catch {
         // Without an answer, fall back to bb's own indicator rather than a stale glyph.
-        publish(new Map());
+        publish(EMPTY);
       } finally {
         inFlight = false;
         if (!disposed && !isHidden()) timer = setTimeout(refresh, POLL_MS);
@@ -68,24 +79,12 @@ export function RuntimeOverlayProvider({ children }: { children: ReactNode }) {
   return <RuntimeOverlayContext.Provider value={overlays}>{children}</RuntimeOverlayContext.Provider>;
 }
 
-export function useRuntimeOverlay(threadId: string | null | undefined): RuntimeOverlay | undefined {
+/** The overlay a thread shows, if any; a raised hand always wins over it. */
+export function useThreadOverlay(thread: PluginSidebarThread | null | undefined): ThreadOverlay | undefined {
   const overlays = useContext(RuntimeOverlayContext);
-  return threadId ? overlays.get(threadId) : undefined;
-}
-
-export function overlayIndicator(overlay: RuntimeOverlay): SidebarIndicator {
-  return overlay.kind === "stalled-queue" ? "stalled" : "host-waking";
-}
-
-export function overlayLabel(overlay: RuntimeOverlay): string {
-  switch (overlay.kind) {
-    case "host-reconnecting":
-      return "Reconnecting to machine";
-    case "waiting-for-host":
-      return "Waiting for machine to resume";
-    case "stalled-queue":
-      return "Stuck: queued messages are not starting";
-  }
+  if (!thread || thread.hasPendingInteraction) return undefined;
+  const hostPhase = thread.host ? overlays.hosts.get(thread.host.id) : undefined;
+  return resolveOverlay(overlays.threads.get(thread.id), hostPhase);
 }
 
 /**
@@ -93,8 +92,8 @@ export function overlayLabel(overlay: RuntimeOverlay): string {
  * bb's own indicator.
  */
 export function useThreadIndicator(thread: PluginSidebarThread | null | undefined): SidebarIndicator | null {
-  const overlay = useRuntimeOverlay(thread?.id);
+  const overlay = useThreadOverlay(thread);
   if (!thread) return null;
   if (thread.hasPendingInteraction) return "waiting-for-input";
-  return overlay ? overlayIndicator(overlay) : thread.indicator;
+  return overlay?.indicator ?? thread.indicator;
 }

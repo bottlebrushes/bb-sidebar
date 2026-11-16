@@ -5,7 +5,7 @@ import { Tooltip } from "./components/Tooltip";
 import { Disc } from "./Disc";
 import { cn } from "./lib/utils";
 import { StatusGlyph } from "./StatusGlyph";
-import { overlayIndicator, overlayLabel, useRuntimeOverlay } from "./RuntimeOverlays";
+import { useThreadOverlay } from "./RuntimeOverlays";
 import {
   STATUS_SLOT_CLASS,
   StatusOrTime,
@@ -422,7 +422,7 @@ function ChildThreadRow({
   const needsYou = thread.hasPendingInteraction;
   const effectiveNow = now ?? Date.now();
   const workingSince = useWorkingSinceContext();
-  const overlay = useRuntimeOverlay(thread.id);
+  const overlay = useThreadOverlay(thread);
   const visibleStatus = threadStatusLabel(
     thread,
     workingSince.get(thread.id),
@@ -511,8 +511,8 @@ function ChildThreadRow({
             {variant === "header" ? (
               <span className="shrink-0">
                 <StatusGlyph
-                  indicator={overlay ? overlayIndicator(overlay) : thread.indicator}
-                  label={overlay ? overlayLabel(overlay) : thread.indicatorLabel}
+                  indicator={overlay?.indicator ?? thread.indicator}
+                  label={overlay?.label ?? thread.indicatorLabel}
                 />
               </span>
             ) : null}

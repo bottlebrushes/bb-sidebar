@@ -1,5 +1,5 @@
 import type { PluginSidebarThread } from "@get-bb/plugin-sdk/app";
-import { overlayIndicator, overlayLabel, useRuntimeOverlay, type SidebarIndicator } from "./RuntimeOverlays";
+import { useThreadOverlay, type SidebarIndicator } from "./RuntimeOverlays";
 import { cn } from "./lib/utils";
 import { relativeTimeLabel } from "./relative-time";
 import { useWorkingSinceContext } from "./useWorkingSince";
@@ -42,10 +42,9 @@ export function StatusOrTime({
   now: number;
 }) {
   const workingSince = useWorkingSinceContext();
-  const runtimeOverlay = useRuntimeOverlay(thread.id);
-  const overlay = thread.hasPendingInteraction ? undefined : runtimeOverlay;
+  const overlay = useThreadOverlay(thread);
   const status = overlay
-    ? shortStatus(overlayIndicator(overlay), null)
+    ? shortStatus(overlay.indicator, null)
     : threadShortStatus(thread);
   if (status !== null) {
     const label = shortStatusLabel(status, workingSince.get(thread.id), now);
@@ -53,7 +52,7 @@ export function StatusOrTime({
       <span
         aria-label={
           overlay
-            ? overlayLabel(overlay)
+            ? overlay.label
             : thread.hasPendingInteraction ? label : (thread.indicatorLabel ?? label)
         }
         className={cn(
