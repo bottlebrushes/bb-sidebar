@@ -254,6 +254,36 @@ export async function updateIssue(client: LinearClient, issueId: string, input: 
   if (!data.issueUpdate!.success) throw new Error("Linear rejected the issue update");
 }
 
+/**
+ * An issue's sub-issues and their workflow states, read fresh: the board only
+ * holds issues in its sync scope, and a sub-item can be assigned elsewhere.
+ */
+export async function fetchChildIssues(client: LinearClient, issueId: string) {
+  const data = await client.request(
+    `query($id: String!) { issue(id: $id) { children(first: 250) { nodes { id identifier title state { name type } } } } }`,
+    { id: issueId },
+    z.object({
+      issue: z.object({
+        children: z.object({
+          nodes: z.array(z.object({
+            id: z.string(),
+            identifier: z.string(),
+            title: z.string(),
+            state: z.object({ name: z.string(), type: z.string() }),
+          })),
+        }),
+      }),
+    }),
+  );
+  return data.issue.children.nodes.map((node) => ({
+    issueId: node.id,
+    identifier: node.identifier,
+    title: node.title,
+    stateName: node.state.name,
+    category: CATEGORY_BY_STATE_TYPE[node.state.type] ?? "backlog",
+  }));
+}
+
 export async function createIssue(client: LinearClient, input: Record<string, unknown>) {
   const data = await client.request(
     `mutation($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { id identifier url sortOrder } } }`,

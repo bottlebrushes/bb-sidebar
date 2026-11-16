@@ -171,7 +171,13 @@ export function BoardView({
     try {
       await work();
     } catch (caught) {
-      toast.error(label, { description: errorText(caught) });
+      // A refused Done move lists each open sub-item on its own line; keep the lines and time to read them.
+      const text = errorText(caught);
+      const multiline = text?.includes("\n") ?? false;
+      toast.error(label, {
+        description: multiline ? <span className="whitespace-pre-line">{text}</span> : text,
+        ...(multiline ? { duration: 15_000 } : {}),
+      });
       void refresh();
       throw caught;
     }

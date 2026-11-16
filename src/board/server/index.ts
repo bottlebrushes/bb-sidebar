@@ -16,11 +16,13 @@ import {
   type BoardSnapshot,
   type ColumnCategory,
 } from "../contract";
+import { checkDoneMove, type ChildCardState } from "./done-guard";
 import {
   createIssue,
   createLinearClient,
   createRelation,
   deleteRelation,
+  fetchChildIssues,
   fetchProjectName,
   fetchTeam,
   fetchTeamsAndProjects,
@@ -49,7 +51,8 @@ const firstMessageEventSchema = z.object({
 export const BOARD_CLI_USAGE = `  board list [--all] [--column <name>]   Cards in this project (or every project).
   board show [cardRef]                   One card; cardRef defaults to this thread's card.
   board create <title...> [--column <name>] [--parent <cardRef>] [--blocked-by <cardRef>]
-  board move <cardRef> <column...>       Move a card to a column (name, case-insensitive).
+  board move <cardRef> <column...>       Move a card to a column (name, case-insensitive). A Done
+                                         column is refused while a child card is not Done/Canceled.
   board block <cardRef> <blockerRef>     Mark <cardRef> blocked by <blockerRef>.
   board unblock <cardRef> <blockerRef>   Remove that blocking relation.
   board parent <cardRef> <parentRef|->   Make a card a sub-item of another, or clear it.
@@ -243,17 +246,85 @@ export function createBoardServer(bb: BbPluginApi, db: Database.Database): Board
     return store.toCard(card);
   }
 
-  async function moveCard(input: MoveCardInput): Promise<BoardCard> {
+  /** A card's sub-items as they stand now: Linear's own list for an issue, plus local sub-cards. */
+  async function childStates(card: CardRow): Promise<ChildCardState[]> {
+    const local = store.childCards(card.id).map((row) => ({ row, column: store.column(row.column_id) }));
+    const fromLocal = local
+      .filter(({ row }) => !card.linear_issue_id || !row.linear_issue_id)
+      .map(({ row, column }): ChildCardState => ({
+        ref: row.linear_identifier ?? row.id,
+        title: row.title,
+        columnName: column.name,
+        category: column.category,
+        threadId: row.thread_id,
+      }));
+    if (!card.linear_issue_id) return fromLocal;
+    // The board holds only issues in its sync scope and lags by a sync, so an issue's sub-issues come from Linear.
+    const issues = await fetchChildIssues(linear, card.linear_issue_id);
+    return [
+      ...issues.map((issue): ChildCardState => ({
+        ref: issue.identifier,
+        title: issue.title,
+        columnName: issue.stateName,
+        category: issue.category,
+        threadId: store.cardByIssue(issue.issueId)?.thread_id ?? null,
+      })),
+      ...fromLocal,
+    ];
+  }
+
+  /**
+   * Refuse a move into a completed column while the card has open sub-items.
+   * The refusal goes back to the caller; the card's own thread is also told
+   * when someone else (the board UI, another thread, the plugin) asked, once
+   * per set of open sub-items.
+   */
+  async function guardDone(card: CardRow, target: ColumnRow, byThreadId: string | null) {
+    if (target.category !== "completed") return;
+    const refusal = checkDoneMove({
+      cardRef: card.linear_identifier ?? card.id,
+      target: { name: target.name, category: target.category },
+      children: await childStates(card),
+    });
+    if (!refusal) return;
+    const owner = card.thread_id;
+    if (owner && owner !== byThreadId && store.notifiedDoneRefusal(card.id) !== refusal.openKey) {
+      const asker = byThreadId ? `Thread @thread:${byThreadId}` : "The board";
+      const text = [
+        `[bb board] ${asker} tried to move your card "${card.title}" to ${target.name}, and the board refused:`,
+        "",
+        refusal.message,
+        "",
+        "Finish or cancel those child cards (or have their threads do it), then move this card again.",
+      ].join("\n");
+      try {
+        await bb.sdk.threads.send({ threadId: owner, input: [{ type: "text", text, mentions: [] }], mode: "queue-if-active" });
+        store.recordDoneRefusal(card.id, refusal.openKey);
+      } catch (error) {
+        bb.log.warn(`telling ${owner} about the refused Done move failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    throw new BoardError(refusal.message);
+  }
+
+  /**
+   * The one way a card changes column. `byThreadId` is the thread that asked
+   * (agent tool, or the CLI run in a thread); null for the board UI, a CLI
+   * outside a thread, and the plugin's own moves.
+   */
+  async function moveCard(input: MoveCardInput, byThreadId: string | null): Promise<BoardCard> {
     const card = input.cardId
       ? store.card(input.cardId)
       : await materialiseThreadCard(input.threadId!, input.projectId, input.columnId);
     const target = store.column(input.columnId);
     if (target.project_id !== card.project_id) throw new BoardError("Cards can only move between columns of their own project");
+    await guardDone(card, target, byThreadId);
     const position = store.positionIn(target.id, input.beforeCardId ?? null, card.id);
     if (card.linear_issue_id && target.linear_state_id) {
       await updateIssue(linear, card.linear_issue_id, { stateId: target.linear_state_id, sortOrder: position });
     }
     const moved = store.updateCard(card.id, { column_id: target.id, position });
+    if (target.category === "completed") store.clearDoneRefusal(card.id);
     publish();
     return store.toCard(moved);
   }
@@ -379,7 +450,7 @@ export function createBoardServer(bb: BbPluginApi, db: Database.Database): Board
     const started = columns.find((column) => column.category === "started");
     if (!started || (category !== "backlog" && category !== "unstarted")) return;
     try {
-      await moveCard({ cardId: card.id, columnId: started.id });
+      await moveCard({ cardId: card.id, columnId: started.id }, null);
     } catch (error) {
       bb.log.warn(`moving card ${card.id} to ${started.name} failed: ${error instanceof Error ? error.message : String(error)}`);
       publish();
@@ -655,7 +726,7 @@ export function createBoardServer(bb: BbPluginApi, db: Database.Database): Board
     getBoard,
     createCard,
     updateCard,
-    moveCard,
+    moveCard: (input) => moveCard(input, null),
     deleteCard,
     linkThread,
     setBlocked,
@@ -738,7 +809,7 @@ export function createBoardServer(bb: BbPluginApi, db: Database.Database): Board
     return parts.filter((part): part is string => part !== null).join(" ");
   }
 
-  registerAgentTools(bb, { store, handlers, resolveCard, columnByName, describeCard, threadProjectId });
+  registerAgentTools(bb, { store, handlers, moveCard, resolveCard, columnByName, describeCard, threadProjectId });
 
   async function runCli(args: string[], ctx: PluginCliContext) {
     const [subcommand, ...rest] = args;
@@ -795,7 +866,7 @@ export function createBoardServer(bb: BbPluginApi, db: Database.Database): Board
       case "move": {
         const card = await resolveCard(positional[0] ?? "", ctx);
         const target = columnByName(card.project_id, positional.slice(1).join(" "));
-        await handlers.moveCard({ cardId: card.id, columnId: target.id });
+        await moveCard({ cardId: card.id, columnId: target.id }, ctx.threadId ?? null);
         return ok(describeCard(store.card(card.id)));
       }
       case "block":
@@ -868,12 +939,13 @@ export function createBoardServer(bb: BbPluginApi, db: Database.Database): Board
 function registerAgentTools(bb: BbPluginApi, deps: {
   store: BoardStore;
   handlers: BoardHandlers;
+  moveCard(input: MoveCardInput, byThreadId: string | null): Promise<BoardCard>;
   resolveCard(ref: string, ctx: { threadId?: string; projectId?: string }): Promise<CardRow>;
   columnByName(projectId: string, name: string): ColumnRow;
   describeCard(card: CardRow): string;
   threadProjectId(threadId: string): Promise<string>;
 }) {
-  const { store, handlers, resolveCard, columnByName, describeCard, threadProjectId } = deps;
+  const { store, handlers, moveCard, resolveCard, columnByName, describeCard, threadProjectId } = deps;
   const cardRef = z.string().trim().min(1).describe('Card id, Linear identifier (e.g. TRA-123), or "this" for your own thread\'s card');
   const fail = (error: unknown) => ({
     content: [{ type: "text" as const, text: error instanceof Error ? error.message : String(error) }],
@@ -942,7 +1014,7 @@ function registerAgentTools(bb: BbPluginApi, deps: {
 
   bb.agents.registerTool({
     name: "board_update_card",
-    description: "Change a bb board card: move it to another column (status), or edit its title, description or priority. Defaults to your own thread's card.",
+    description: "Change a bb board card: move it to another column (status), or edit its title, description or priority. Defaults to your own thread's card. A card cannot move to a Done (completed) column while any of its child cards (sub-items) is not Done or Canceled: the call fails and lists each open child with its thread, so finish or cancel those first.",
     parameters: z.object({
       card: cardRef.default("this"),
       column: z.string().optional().describe("Target column name, e.g. \"In Review\" or \"Done\""),
@@ -961,7 +1033,7 @@ function registerAgentTools(bb: BbPluginApi, deps: {
             ...(input.priority !== undefined ? { priority: input.priority } : {}),
           });
         }
-        if (input.column) await handlers.moveCard({ cardId: card.id, columnId: columnByName(card.project_id, input.column).id });
+        if (input.column) await moveCard({ cardId: card.id, columnId: columnByName(card.project_id, input.column).id }, ctx.threadId);
         return describeCard(store.card(card.id));
       } catch (error) {
         return fail(error);

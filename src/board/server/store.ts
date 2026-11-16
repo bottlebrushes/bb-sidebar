@@ -72,6 +72,12 @@ export const BOARD_MIGRATIONS = [
    )`,
   // The user's column order for a Linear-linked project: JSON array of Linear state ids; NULL follows Linear.
   `ALTER TABLE board_projects ADD COLUMN column_order TEXT`,
+  // The open-children set a Done refusal last told a card's thread about, so it is told once per set.
+  `CREATE TABLE IF NOT EXISTS board_done_refusals (
+     card_id      TEXT PRIMARY KEY,
+     open_key     TEXT NOT NULL,
+     notified_at  INTEGER NOT NULL
+   )`,
 ];
 
 export type AssigneeScope = "me" | "anyone";
@@ -264,6 +270,28 @@ export class BoardStore {
     return this.statements.blockedBy.all(cardId).map((row) => row.blocked_card_id);
   }
 
+  /** Sub-items of a card (cards whose parent it is). */
+  childCards(cardId: string): CardRow[] {
+    return this.db.prepare<[string], CardRow>("SELECT * FROM board_cards WHERE parent_card_id = ? ORDER BY created_at, id")
+      .all(cardId);
+  }
+
+  /** The open-children key the card's thread was last told about, if any. */
+  notifiedDoneRefusal(cardId: string): string | undefined {
+    return (this.db.prepare<[string], { open_key: string }>("SELECT open_key FROM board_done_refusals WHERE card_id = ?")
+      .get(cardId))?.open_key;
+  }
+
+  recordDoneRefusal(cardId: string, openKey: string) {
+    this.db.prepare(
+      `INSERT INTO board_done_refusals (card_id, open_key, notified_at) VALUES (?, ?, ?)
+       ON CONFLICT (card_id) DO UPDATE SET open_key = excluded.open_key, notified_at = excluded.notified_at`,
+    ).run(cardId, openKey, this.now());
+  }
+
+  clearDoneRefusal(cardId: string) {
+    this.db.prepare("DELETE FROM board_done_refusals WHERE card_id = ?").run(cardId);
+  }
 
   project(projectId: string): ProjectRow {
     this.statements.insertProject.run(projectId);
@@ -408,6 +436,7 @@ export class BoardStore {
       this.db.prepare("DELETE FROM board_relations WHERE blocker_card_id = ? OR blocked_card_id = ?").run(cardId, cardId);
       this.db.prepare("DELETE FROM board_duplicates WHERE duplicate_card_id = ? OR main_card_id = ?").run(cardId, cardId);
       this.db.prepare("UPDATE board_cards SET parent_card_id = NULL WHERE parent_card_id = ?").run(cardId);
+      this.db.prepare("DELETE FROM board_done_refusals WHERE card_id = ?").run(cardId);
       this.db.prepare("DELETE FROM board_cards WHERE id = ?").run(cardId);
     })();
   }

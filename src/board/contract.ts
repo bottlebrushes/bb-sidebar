@@ -139,6 +139,8 @@ export const boardRpcContract = defineRpcContract({
    * Move a card to a column, placed before `beforeCardId` (null/omitted = end).
    * Pass `threadId` + `projectId` instead of `cardId` to move a thread that has
    * no card yet: the server creates its card (titled from the thread) first.
+   * Refused (with the open sub-items listed) when the column is completed and
+   * a sub-item is not completed or canceled.
    */
   moveCard: {
     input: z.object({

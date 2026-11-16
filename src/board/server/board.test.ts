@@ -316,6 +316,7 @@ describe("board RPC and agent tools", () => {
         if (query.includes("issueCreate")) {
           return { issueCreate: { success: true, issue: { id: "iss_9", identifier: "TRA-9", url: "https://linear.app/i/TRA-9", sortOrder: 42 } } };
         }
+        if (query.includes("children(")) return { issue: { children: { nodes: [] } } };
         if (query.includes("issueUpdate") && stateId === "s_done") {
           return new Error("Workflow state transition not allowed");
         }
@@ -463,5 +464,75 @@ describe("board RPC and agent tools", () => {
     chips.thr_own = { unlinked: true };
     await emit("thr_own", "", null);
     await vi.waitFor(async () => expect(await threadOf(spare.id)).toBeNull());
+  });
+
+  it("refuses Done for a card with open sub-items from the CLI and agent tool, telling its own thread once", async () => {
+    const send = vi.fn(async () => ({ ok: true, delivery: "sent" }));
+    const { harness, board } = await load({ threads: { send } });
+    const columns = (await board()).columns;
+    const column = (name: string) => columns.find((candidate) => candidate.name === name)!;
+    const create = async (title: string, extra: object) =>
+      await harness.behavior.callRpc("createCard", { projectId: "p", title, columnId: column("In Progress").id, ...extra }) as BoardCard;
+    const parent = await create("Epic", { threadId: "thr_parent" });
+    const open = await create("Open part", { parentCardId: parent.id, threadId: "thr_child" });
+    await create("Closed part", { parentCardId: parent.id, columnId: column("Done").id });
+    const columnOf = async (cardId: string) => (await board()).cards.find((card) => card.id === cardId)!.columnId;
+    const message = [
+      `Cannot move ${parent.id} to Done: 1 child card is not Done or Canceled. Finish or cancel them first:`,
+      `- ${open.id} "Open part" [In Progress] @thread:thr_child`,
+    ].join("\n");
+
+    // Another thread (twice, as a sweep would) and the board UI: refused, and the owner hears about it once.
+    expect(await harness.behavior.runCli(["board", "move", parent.id, "Done"], { threadId: "thr_other" }))
+      .toMatchObject({ exitCode: 1, stderr: message });
+    await harness.behavior.runCli(["board", "move", parent.id, "Done"], { threadId: "thr_other" });
+    await expect(harness.behavior.callRpc("moveCard", { cardId: parent.id, columnId: column("Done").id })).rejects.toThrow(message);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ threadId: "thr_parent", mode: "queue-if-active" }));
+    expect(JSON.stringify(send.mock.calls)).toContain("@thread:thr_child");
+    // The owner's own agent gets the refusal back, with no message to itself.
+    await expect(harness.behavior.callAgentTool("board_update_card", { column: "Done" }, { threadId: "thr_parent", projectId: "p" }))
+      .resolves.toMatchObject({ isError: true, content: [{ text: message }] });
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(await columnOf(parent.id)).toBe(column("In Progress").id);
+
+    // Canceling the parent is never blocked; once the child is canceled, Done goes through.
+    await harness.behavior.runCli(["board", "move", parent.id, "Canceled"], {});
+    expect(await columnOf(parent.id)).toBe(column("Canceled").id);
+    await harness.behavior.runCli(["board", "move", open.id, "Canceled"], {});
+    expect(await harness.behavior.runCli(["board", "move", parent.id, "Done"], {})).toMatchObject({ exitCode: 0 });
+    expect(await columnOf(parent.id)).toBe(column("Done").id);
+  });
+
+  it("reads a Linear card's sub-issues from Linear, so one outside the synced scope still blocks Done", async () => {
+    let next = 0;
+    const { harness, calls, board } = await load({
+      linear: ({ query }) => {
+        if (query.includes("team(id:")) return { team: { id: "t", key: "TRA", name: "traxy", states: { nodes: TRA_STATES } } };
+        if (query.includes("issues(")) return { issues: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } };
+        if (query.includes("viewer")) return { viewer: { id: "user_me", name: "Daniel" } };
+        if (query.includes("issueCreate")) {
+          next += 1;
+          return { issueCreate: { success: true, issue: { id: `iss_${next}`, identifier: `TRA-${next}`, url: `https://linear.app/i/TRA-${next}`, sortOrder: next } } };
+        }
+        if (query.includes("children(")) {
+          return { issue: { children: { nodes: [
+            { id: "iss_far", identifier: "TRA-77", title: "Someone else's part", state: { name: "Dev Ready", type: "unstarted" } },
+            { id: "iss_dup", identifier: "TRA-78", title: "Dropped", state: { name: "Duplicate", type: "duplicate" } },
+          ] } } };
+        }
+        return undefined;
+      },
+    });
+    await harness.behavior.callRpc("setProjectLinear", { projectId: "p", linear: { teamId: "t", linearProjectId: null, assignee: "me" } });
+    const columns = (await board()).columns;
+    const todo = columns.find((column) => column.name === "Todo")!;
+    const done = columns.find((column) => column.name === "Done")!;
+    const card = await harness.behavior.callRpc("createCard", { projectId: "p", title: "Epic", columnId: todo.id }) as BoardCard;
+    await expect(harness.behavior.callRpc("moveCard", { cardId: card.id, columnId: done.id })).rejects.toThrow(
+      'Cannot move TRA-1 to Done: 1 child card is not Done or Canceled. Finish or cancel them first:\n- TRA-77 "Someone else\'s part" [Dev Ready] no thread',
+    );
+    expect(calls.some((call) => call.query.includes("issueUpdate"))).toBe(false);
+    expect((await board()).cards.find((candidate) => candidate.id === card.id)!.columnId).toBe(todo.id);
   });
 });
