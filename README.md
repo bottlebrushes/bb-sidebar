@@ -24,6 +24,12 @@ A stable thread list for [bb](https://github.com/get-bb/bb). Threads stay where 
 - Sort under submenu on thread cards to file a thread under another project in the sidebar
 - Regenerate a thread title from its last three accepted user messages
 - `bb bb-sidebar settle | unsettle | status [threadId]` for agents and scripts; an agent settling its own working thread settles it when the turn ends
+- A board: drag the sidebar past bb's usual maximum (460 px) and it turns into a Kanban board of every thread and card; shrink it back and the list returns. Double-click the resize handle to switch between the two
+- Board columns per project: local columns edited in **Settings > BB Sidebar > Board**, or a Linear team's workflow states with two-way sync (moves, new cards, titles, priorities, blockers, and sub-items go to Linear; Linear changes arrive within about 20 seconds)
+- Blocked-by, sub-item, and duplicate relations on cards; a blocked card sits directly under the card that blocks it, and duplicates fold into their main card
+- Cards show the thread working on them, including a parent card's thread for its sub-items, or **Needs agent**
+- Board filters: by Linear assignee (My cards, Everyone, Unassigned, or one person) and by column, and sorting by priority; Linear's Blocked column starts hidden
+- `bb bb-sidebar board list | show | create | move | block | unblock | parent | duplicate | link | linear | sync` and `board_*` agent tools, so agents can move their own card, block it on another, or file sub-items
 
 ## Install
 

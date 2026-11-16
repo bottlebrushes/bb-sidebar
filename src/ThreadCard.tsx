@@ -453,7 +453,7 @@ function ThreadLocation({ thread }: { thread: PluginSidebarThread }) {
   return <span className="flex-1" />;
 }
 
-function ParkButton({
+export function ParkButton({
   label,
   onActivate,
 }: {

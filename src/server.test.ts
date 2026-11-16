@@ -155,7 +155,8 @@ describe("lifecycle RPC", () => {
 
   it("stores the grouped sidebar settings through RPC", async () => {
     const harness = await loadPlugin();
-    expect(harness.inspection.registrations.settingsDescriptors).toEqual({});
+    // Sidebar settings live in the plugin database; bb's settings only hold the board's Linear key.
+    expect(Object.keys(harness.inspection.registrations.settingsDescriptors)).toEqual(["linearApiKey"]);
     await expect(
       harness.behavior.callRpc("getSidebarSettings", {}),
     ).resolves.toEqual({

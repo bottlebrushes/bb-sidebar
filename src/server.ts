@@ -43,6 +43,8 @@ import { createThreadPortActions } from "./thread-ports";
 import { createThreadPullRequests } from "./thread-pull-requests";
 import { threadPullRequestSchema } from "./pull-requests";
 import { ownedPortTargetSchema, closePortsResultSchema } from "./close-owned-ports";
+import { BOARD_CLI_USAGE, BOARD_MIGRATIONS, createBoardServer } from "./board/server";
+import { boardRpcContract } from "./board/contract";
 import { THREAD_PROJECTS_CHANNEL } from "./thread-projects";
 
 const migrations = [
@@ -108,9 +110,10 @@ const migrations = [
      thread_id   TEXT PRIMARY KEY,
      project_id  TEXT NOT NULL
    )`,
+  ...BOARD_MIGRATIONS,
 ];
 
-const CLI_USAGE = `Usage: bb bb-sidebar <command> [threadId]
+const CLI_USAGE = `Usage: bb bb-sidebar <command> [args]
 
 Commands:
   settle [threadId]    Move a thread to the Settled shelf. A thread that is
@@ -118,6 +121,7 @@ Commands:
                        its current turn ends.
   unsettle [threadId]  Put a thread back in the inbox.
   status [threadId]    Show the stored shelf state of a thread.
+${BOARD_CLI_USAGE}
 
 threadId defaults to the thread running the command.`;
 
@@ -547,6 +551,7 @@ export default async function plugin(bb: BbPluginApi) {
   const regenerateTitle = createTitleRegenerator(bb);
   const db = bb.storage.database();
   bb.storage.migrate(db, migrations);
+  const board = createBoardServer(bb, db);
 
   const readSidebarSettings = (): SidebarSettingsValues => {
     const row = db
@@ -1681,6 +1686,7 @@ export default async function plugin(bb: BbPluginApi) {
       return { ok: true as const };
     },
   });
+  bb.rpc.register(boardRpcContract, board.handlers);
 
   // Real work clears both kinds of manual settle override. The next quiet
   // period can then be judged against the current policies.
@@ -1729,7 +1735,7 @@ export default async function plugin(bb: BbPluginApi) {
 
   bb.cli.register({
     name: "bb-sidebar",
-    summary: "Settle or unsettle threads on the BB Sidebar's shelves",
+    summary: "Settle threads on the BB Sidebar's shelves and work the board",
     commands: [
       {
         name: "settle",
@@ -1747,9 +1753,18 @@ export default async function plugin(bb: BbPluginApi) {
         summary: "Show the stored shelf state of a thread",
         usage: "bb bb-sidebar status [threadId]",
       },
+      {
+        name: "board",
+        summary: "List and change board cards, their blockers and parents, and Linear links",
+        usage: "bb bb-sidebar board <list|show|create|move|block|unblock|parent|duplicate|link|linear|sync> [args]",
+      },
     ],
     async run(argv, ctx) {
       const [command, ...rest] = argv;
+      if (command === "board") {
+        if (!rest.length || rest.includes("--help")) return { exitCode: 0, stdout: CLI_USAGE };
+        return board.runCli(rest, ctx);
+      }
       if (!command || command === "help" || command === "--help") {
         return { exitCode: 0, stdout: CLI_USAGE };
       }

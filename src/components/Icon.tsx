@@ -1,5 +1,7 @@
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import {
+  Add01Icon,
+  Alert02Icon,
   ArrowDown01Icon,
   ArrowLeft01Icon,
   ArrowRight01Icon,
@@ -15,9 +17,12 @@ import {
   Mail01Icon,
   MailOpen01Icon,
   Edit02Icon,
+  Delete02Icon,
   FolderGitIcon,
   GitBranchIcon,
   GitPullRequestIcon,
+  Link01Icon,
+  LinkSquare02Icon,
   HelpCircleIcon,
   Notification01Icon,
   NotificationOff01Icon,
@@ -27,17 +32,26 @@ import {
   PinOffIcon,
   PlugSocketIcon,
   Pulse01Icon,
+  RefreshIcon,
   Search01Icon,
   StopCircleIcon,
   Target02Icon,
   Tick02Icon,
   UserAdd01Icon,
+  Unlink01Icon,
   WorkflowCircle03Icon,
   Yoga02Icon,
 } from "@hugeicons/core-free-icons";
 import { cn } from "../lib/utils";
 
 const ICON_MAP = {
+  Add: Add01Icon,
+  Alert: Alert02Icon,
+  Delete: Delete02Icon,
+  ExternalLink: LinkSquare02Icon,
+  Link: Link01Icon,
+  Refresh: RefreshIcon,
+  Unlink: Unlink01Icon,
   ArrowTurnBackward: ArrowTurnBackwardIcon,
   ArrowUpDown: ArrowUpDownIcon,
   Car: Car05Icon,

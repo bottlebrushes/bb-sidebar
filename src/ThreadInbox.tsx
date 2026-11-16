@@ -80,6 +80,8 @@ import {
   projectIconUrl,
 } from "./project-icons";
 import { DEFAULT_SIDEBAR_SETTINGS } from "./sidebar-settings";
+import { installSidebarWidth, useSidebarWidth } from "./board/sidebar-width";
+import { BoardView } from "./board/ui/BoardView";
 import {
   MAX_CHILD_EXPANSION,
   pruneChildExpansion,
@@ -393,6 +395,7 @@ function rootVisibleThreadId(
  */
 export function ThreadInbox({
   activeThreadId,
+  isCompactViewport,
   onNavigate,
   searchQuery,
 }: PluginThreadListProps) {
@@ -408,6 +411,13 @@ export function ThreadInbox({
   const { values: legacySettings } = useSettings();
   const sidebarSettings = useSidebarSettings();
   const lifecycle = useLifecycle(threads);
+  useEffect(() => installSidebarWidth(), []);
+  // Wider than bb's own cap, the sidebar is the board; never in the phone drawer.
+  const boardMode = useSidebarWidth().boardMode && !isCompactViewport;
+  const isSettled = useCallback(
+    (thread: PluginSidebarThread) => lifecycle.settledAtFor(thread) !== null,
+    [lifecycle],
+  );
   const [projectIconRevision, setProjectIconRevision] = useState(0);
   useRealtime(PROJECT_ICONS_CHANNEL, () => {
     setProjectIconRevision((revision) => revision + 1);
@@ -1180,10 +1190,31 @@ export function ThreadInbox({
           {reorderAnnouncement}
         </p>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
-          {status === "loading" ? (
-            <ThreadListLoading />
-          ) : status === "error" ? (
+        <div className={boardMode ? "min-h-0 flex-1 overflow-hidden" : "min-h-0 flex-1 overflow-y-auto px-1.5 pb-2"}>
+          {boardMode ? (
+            <BoardView
+              projectId={scope === ALL_PROJECTS ? null : scope}
+              threads={threads}
+              projects={projects}
+              isSettled={isSettled}
+              activeThreadId={activeThreadId}
+              providerById={providerById}
+              projectIconRevision={projectIconRevision}
+              onNavigate={onNavigate}
+              childrenByParent={childrenByParentId}
+              expandedChildParentIds={expandedChildParentIds}
+              showRunningChildrenWhenCollapsed={
+                sidebarSettings?.showRunningChildrenWhenCollapsed ??
+                DEFAULT_SIDEBAR_SETTINGS.showRunningChildrenWhenCollapsed
+              }
+              onToggleChildren={toggleChildExpansion}
+              now={now}
+              onSettleThread={settleThread}
+            />
+          ) : (
+            status === "loading" ? (
+              <ThreadListLoading />
+            ) : status === "error" ? (
             <p
               role="status"
               className="px-2 py-6 text-center text-xs text-muted-foreground"
@@ -1390,7 +1421,7 @@ export function ThreadInbox({
                 }
               />
             </div>
-          )}
+          ))}
         </div>
       </div>
     </JumpHintsContext.Provider>

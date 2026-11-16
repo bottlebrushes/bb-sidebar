@@ -36,6 +36,7 @@ import {
   MAX_AUTO_SETTLE_AFTER_DAYS,
   MIN_AUTO_SETTLE_AFTER_DAYS,
 } from "./auto-settle";
+import { BoardSettings } from "./board/ui/BoardSettings";
 
 function SettingsGroup({
   children,
@@ -256,6 +257,7 @@ export function SidebarSettings() {
 
   return (
     <div className="max-w-3xl space-y-8 pb-4">
+      <BoardSettings />
       <PortLinkSettings />
       <SettingsGroup
         title="Thread organization"

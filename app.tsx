@@ -11,6 +11,7 @@ import { ParentChip } from "./src/ParentChip";
 import { SubagentsChip } from "./src/SubagentsChip";
 import { SidebarSettings } from "./src/SidebarSettings";
 import { SubthreadComposer } from "./src/SubthreadComposer";
+import { CARD_PAGE_PATH, CardPage, CardPageHeader } from "./src/board/ui/CardPage";
 import { openSubthreadComposer } from "./src/subthread-composer-state";
 
 // bb reads `defaultShortcut` from palette commands (Command on macOS, Control
@@ -66,4 +67,15 @@ export default definePluginApp((app) => {
     component: SubthreadComposer,
   });
   app.slots.commandPaletteAction(newSubthreadCommand);
+
+  // A board card without a thread: its own route, so back and forward walk
+  // between cards, with the card's Linear issue on the title bar.
+  app.slots.navPanel({
+    id: "card",
+    title: "Board card",
+    icon: "LayoutDashboard",
+    path: CARD_PAGE_PATH,
+    component: CardPage,
+    headerContent: CardPageHeader,
+  });
 });
