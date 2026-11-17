@@ -1,14 +1,10 @@
-import { useRef, useState } from "react";
+import { countDeleteCascade, useSidebarThreads } from "./bb-sdk";
+import { useEffect, useRef, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import {
-  experimental_useSidebarThreads as useSidebarThreads,
-  useBbContext,
-  useBbNavigate,
-  useRpc,
-  type PluginSidebarThread,
-} from "@get-bb/plugin-sdk/app";
-import { toast } from "sonner";
-import type { bbSidebarRpcContract } from "./server";
+import { destructiveButtonClass, secondaryButtonClass } from "./settings-ui";
+import { useBbContext, useBbNavigate, useRpc, useSdk, type PluginSidebarThread } from "@get-bb/plugin-sdk/app";
+import { errorDetail, toast } from "./lib/toast";
+import type { bbSidebarRpcContract } from "./contract";
 import { threadDisplayTitle } from "./inbox";
 import { usePortalScopeProps } from "./lib/portal-scope";
 
@@ -26,7 +22,8 @@ export function DeleteThreadDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const { projects, threads } = useSidebarThreads();
+  const { projects } = useSidebarThreads();
+  const sdk = useSdk();
   const rpc = useRpc<typeof bbSidebarRpcContract>();
   const navigate = useBbNavigate();
   const context = useBbContext();
@@ -37,7 +34,26 @@ export function DeleteThreadDialog({
   const project = projects.find((candidate) => candidate.id === thread.projectId);
   const projectName = project && !project.isPersonal ? project.name : "Personal";
   const title = threadDisplayTitle(thread);
-  const childCount = countDescendants(thread.id, threads);
+  // null while bb counts. bb also deletes archived descendants and lifecycle
+  // dependents, which the sidebar's thread list does not hold.
+  const [childCount, setChildCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const controller = new AbortController();
+    setChildCount(null);
+    countDeleteCascade(sdk, thread.id, controller.signal).then(
+      (count) => {
+        if (!controller.signal.aborted) setChildCount(count);
+      },
+      (error) => {
+        if (controller.signal.aborted) return;
+        toast.error("Could not check which threads would be deleted", { description: errorDetail(error) });
+        onOpenChange(false);
+      },
+    );
+    return () => controller.abort();
+  }, [open, sdk, thread.id, onOpenChange]);
 
   const submit = async () => {
     if (submitting.current) return;
@@ -46,12 +62,10 @@ export function DeleteThreadDialog({
     try {
       await rpc.call("deleteThread", { threadId: thread.id, childThreadsConfirmed: true });
       toast.success("Thread deleted", { description: title });
-      if (context.threadId === thread.id) navigate.toCompose();
+      if (context.threadId === thread.id) navigate.toCompose({ projectId: thread.projectId, focusPrompt: true });
       onOpenChange(false);
     } catch (error) {
-      toast.error("Could not delete thread", {
-        description: error instanceof Error ? error.message : undefined,
-      });
+      toast.error("Could not delete thread", { description: errorDetail(error) });
     } finally {
       submitting.current = false;
       setBusy(false);
@@ -59,7 +73,13 @@ export function DeleteThreadDialog({
   };
 
   return (
-    <Dialog.Root open={open} onOpenChange={(next) => { if (!next && busy) return; onOpenChange(next); }}>
+    <Dialog.Root
+      open={open}
+      onOpenChange={(next) => {
+        if (!next && busy) return;
+        onOpenChange(next);
+      }}
+    >
       <Dialog.Portal>
         <Dialog.Overlay {...portalScope} className="fixed inset-0 z-50 bg-black/40" />
         <Dialog.Content
@@ -68,29 +88,29 @@ export function DeleteThreadDialog({
         >
           <Dialog.Title className="text-sm font-semibold leading-5">Delete thread?</Dialog.Title>
           <div className="mt-3 rounded-md border border-border bg-background px-3 py-2">
-            <div className="truncate text-sm font-medium" title={title}>{title}</div>
-            <div className="truncate text-xs text-muted-foreground" title={projectName}>{projectName}</div>
+            <div className="truncate text-sm font-medium" title={title}>
+              {title}
+            </div>
+            <div className="truncate text-xs text-muted-foreground" title={projectName}>
+              {projectName}
+            </div>
           </div>
           <Dialog.Description className="mb-4 mt-3 text-xs leading-5 text-muted-foreground">
-            {childCount > 0
+            {childCount
               ? `This also deletes ${childCount === 1 ? "its 1 child thread" : `its ${childCount} child threads`}. This action cannot be undone.`
               : "This action cannot be undone."}
           </Dialog.Description>
           <div className="flex justify-end gap-2">
             <Dialog.Close asChild>
-              <button
-                type="button"
-                disabled={busy}
-                className="h-8 rounded-md border border-border bg-background px-3 text-xs font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50"
-              >
+              <button type="button" disabled={busy} className={secondaryButtonClass}>
                 Cancel
               </button>
             </Dialog.Close>
             <button
               type="button"
-              disabled={busy}
+              disabled={busy || childCount === null}
               onClick={() => void submit()}
-              className="h-8 rounded-md bg-destructive px-3 text-xs font-medium text-destructive-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50"
+              className={destructiveButtonClass}
             >
               {busy ? "Deleting..." : "Delete thread"}
             </button>
@@ -99,27 +119,4 @@ export function DeleteThreadDialog({
       </Dialog.Portal>
     </Dialog.Root>
   );
-}
-
-function countDescendants(rootId: string, threads: readonly PluginSidebarThread[]): number {
-  const childrenOf = new Map<string, string[]>();
-  for (const thread of threads) {
-    if (!thread.parentThreadId) continue;
-    const siblings = childrenOf.get(thread.parentThreadId);
-    if (siblings) siblings.push(thread.id);
-    else childrenOf.set(thread.parentThreadId, [thread.id]);
-  }
-  let count = 0;
-  const seen = new Set<string>([rootId]);
-  const pending = [rootId];
-  while (pending.length > 0) {
-    const current = pending.pop()!;
-    for (const childId of childrenOf.get(current) ?? []) {
-      if (seen.has(childId)) continue;
-      seen.add(childId);
-      count += 1;
-      pending.push(childId);
-    }
-  }
-  return count;
 }

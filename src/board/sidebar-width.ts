@@ -10,24 +10,27 @@
 // variable and those wrapper widths with !important rules. Unmounting removes
 // the rules and bb's own width applies again. If bb renames the handle or the
 // elements, nothing here matches and bb's behaviour is untouched.
-import { useSyncExternalStore } from "react";
+import { useEffect, useSyncExternalStore } from "react";
+import { STORAGE_KEYS } from "../lib/storage-keys";
+import { readStorageRaw } from "../lib/storage-codec";
+import { safeSetItem } from "../lib/safe-storage";
 
-export const MIN_WIDTH = 240;
+const MIN_WIDTH = 240;
 /** bb's own cap; anything wider is board mode. */
-export const LIST_MAX_WIDTH = 460;
-export const DEFAULT_LIST_WIDTH = 320;
+const LIST_MAX_WIDTH = 460;
+const DEFAULT_LIST_WIDTH = 320;
 /** Room always left for the chat beside the sidebar. */
-export const MAIN_MIN_WIDTH = 280;
+const MAIN_MIN_WIDTH = 280;
 /** Below bb's `md` breakpoint the sidebar is a drawer with its own width. */
 const DESKTOP_MIN_VIEWPORT = 768;
 
-const STORAGE_KEY = "bb-sidebar:width:v2";
+/** bb's own saved width, read once to seed ours. */
 const CORE_STORAGE_KEY = "bb.sidebar.width";
 const HANDLE_SELECTOR = '[data-testid="app-sidebar-resize-handle"]';
 const STYLE_ID = "bb-sidebar-width-override";
 const WIDTH_VARIABLE = "--bbs-sidebar-width";
 
-export interface SidebarWidthState {
+interface SidebarWidthState {
   width: number;
   /** Width to return to when leaving the board. */
   listWidth: number;
@@ -70,9 +73,7 @@ export function seedState(saved: string | null, coreWidth: string | null): Sideb
 
 /** A new width, remembering it as the list or board width it belongs to. */
 export function withWidth(state: SidebarWidthState, width: number): SidebarWidthState {
-  return width > LIST_MAX_WIDTH
-    ? { ...state, width, boardWidth: width }
-    : { ...state, width, listWidth: width };
+  return width > LIST_MAX_WIDTH ? { ...state, width, boardWidth: width } : { ...state, width, listWidth: width };
 }
 
 /** Double-click on the handle: board ↔ list, opening the board at its last width or 3× the list. */
@@ -81,9 +82,7 @@ export function toggledWidth(state: SidebarWidthState, viewportWidth: number): n
   return clampWidth(state.boardWidth ?? state.listWidth * 3, viewportWidth);
 }
 
-let state: SidebarWidthState = typeof window === "undefined"
-  ? seedState(null, null)
-  : readState();
+let state: SidebarWidthState = typeof window === "undefined" ? seedState(null, null) : readState();
 /** What the store hands React: the chosen state plus the width that fits this window. */
 let view: SidebarWidthState & { applied: number } = { ...state, applied: state.width };
 const listeners = new Set<() => void>();
@@ -91,11 +90,7 @@ let installs = 0;
 let uninstall: (() => void) | null = null;
 
 function readState(): SidebarWidthState {
-  try {
-    return seedState(localStorage.getItem(STORAGE_KEY), localStorage.getItem(CORE_STORAGE_KEY));
-  } catch {
-    return seedState(null, null);
-  }
+  return seedState(readStorageRaw(STORAGE_KEYS.sidebarWidth.key), readStorageRaw(CORE_STORAGE_KEY));
 }
 
 /**
@@ -108,12 +103,9 @@ function setState(next: SidebarWidthState, persist: boolean) {
   view = { ...next, applied };
   document.documentElement.style.setProperty(WIDTH_VARIABLE, `${applied}px`);
   if (persist) {
-    try {
-      const { width, listWidth, boardWidth } = next;
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ width, listWidth, boardWidth }));
-    } catch {
-      // Width still applies for this session.
-    }
+    // A failed write still applies the width for this session.
+    const { width, listWidth, boardWidth } = next;
+    safeSetItem(STORAGE_KEYS.sidebarWidth.key, JSON.stringify({ width, listWidth, boardWidth }));
   }
   for (const listener of listeners) listener();
 }
@@ -122,9 +114,7 @@ function overrideRules(dragging: boolean): string {
   const width =
     `[data-sidebar="gap"],[data-sidebar="panel"]{--sidebar-width:var(${WIDTH_VARIABLE})!important}` +
     `[data-sidebar="collapsible-body"]>[style*="width"]{width:calc(var(${WIDTH_VARIABLE}) - var(--sidebar-rail-width))!important}`;
-  return dragging
-    ? `${width}[data-sidebar="gap"],[data-sidebar="panel"]{transition:none!important}`
-    : width;
+  return dragging ? `${width}[data-sidebar="gap"],[data-sidebar="panel"]{transition:none!important}` : width;
 }
 
 function installOverride(): () => void {
@@ -182,7 +172,7 @@ function installOverride(): () => void {
 }
 
 /** Call from the thread list's mount effect; returns its cleanup. */
-export function installSidebarWidth(): () => void {
+function installSidebarWidth(): () => void {
   installs += 1;
   if (installs === 1) uninstall = installOverride();
   return () => {
@@ -201,7 +191,17 @@ function subscribe(listener: () => void) {
   };
 }
 
-export function useSidebarWidth(): SidebarWidthState & { applied: number; boardMode: boolean } {
-  const current = useSyncExternalStore(subscribe, () => view, () => view);
+function useSidebarWidth(): SidebarWidthState & { applied: number; boardMode: boolean } {
+  const current = useSyncExternalStore(
+    subscribe,
+    () => view,
+    () => view,
+  );
   return { ...current, boardMode: installs > 0 && current.applied > LIST_MAX_WIDTH };
+}
+
+/** Owns the sidebar width while mounted; wider than bb's own cap is the board, never in the phone drawer. */
+export function useBoardMode(isCompactViewport: boolean): boolean {
+  useEffect(() => installSidebarWidth(), []);
+  return useSidebarWidth().boardMode && !isCompactViewport;
 }

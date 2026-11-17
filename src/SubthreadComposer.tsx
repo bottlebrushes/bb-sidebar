@@ -1,18 +1,13 @@
 import { useEffect, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import {
-  experimental_NewThreadComposer as NewThreadComposer,
-  experimental_useSidebarThreads as useSidebarThreads,
-  useBbNavigate,
-  useRpc,
-  type NewThreadRequest,
-  type PluginSidebarThread,
-} from "@get-bb/plugin-sdk/app";
-import { toast } from "sonner";
-import type { bbSidebarRpcContract } from "./server";
+import { useBbNavigate, useRpc, type NewThreadRequest, type PluginSidebarThread } from "@get-bb/plugin-sdk/app";
+import { NewThreadComposer, useSidebarThreads } from "./bb-sdk";
+import { toast } from "./lib/toast";
+import { subthreadDraftKey } from "./lib/storage-keys";
+import type { bbSidebarRpcContract } from "./contract";
 import { threadDisplayTitle } from "./inbox";
 import { usePortalScopeProps } from "./lib/portal-scope";
-import { closeSubthreadComposer, useSubthreadComposerTarget } from "./subthread-composer-state";
+import { closeSubthreadComposer, useSubthreadComposerTarget } from "./useSubthreadComposer";
 
 type SubthreadDefaults = {
   model: string;
@@ -34,9 +29,7 @@ export function SubthreadComposer() {
   const parentThreadId = useSubthreadComposerTarget();
   const { status, threads, projects } = useSidebarThreads();
   const portalScope = usePortalScopeProps();
-  const parent = parentThreadId === null
-    ? undefined
-    : threads.find((thread) => thread.id === parentThreadId);
+  const parent = parentThreadId === null ? undefined : threads.find((thread) => thread.id === parentThreadId);
 
   // A parent that is gone (archived, deleted, or never in the list) has
   // nothing to file under.
@@ -52,7 +45,12 @@ export function SubthreadComposer() {
   const projectName = project && !project.isPersonal ? project.name : "Personal";
 
   return (
-    <Dialog.Root open={parent !== undefined} onOpenChange={(open) => { if (!open) closeSubthreadComposer(); }}>
+    <Dialog.Root
+      open={parent !== undefined}
+      onOpenChange={(open) => {
+        if (!open) closeSubthreadComposer();
+      }}
+    >
       <Dialog.Portal>
         <Dialog.Overlay {...portalScope} className="fixed inset-0 z-50 bg-black/40" />
         <Dialog.Content
@@ -92,9 +90,13 @@ function SubthreadComposerBody({ parent }: { parent: PluginSidebarThread }) {
   useEffect(() => {
     let cancelled = false;
     rpc.call("getSubthreadDefaults", { threadId: parent.id }).then(
-      (result) => { if (!cancelled) setDefaults(result); },
+      (result) => {
+        if (!cancelled) setDefaults(result);
+      },
       // Without them the composer falls back to the project's defaults.
-      () => { if (!cancelled) setDefaults(null); },
+      () => {
+        if (!cancelled) setDefaults(null);
+      },
     );
     return () => {
       cancelled = true;
@@ -102,7 +104,7 @@ function SubthreadComposerBody({ parent }: { parent: PluginSidebarThread }) {
   }, [parent.id, rpc]);
 
   if (defaults === "loading") {
-    return <div className="h-28 animate-pulse rounded-lg bg-muted" aria-label="Loading composer" />;
+    return <div className="h-28 rounded-lg bg-muted" aria-label="Loading composer" />;
   }
 
   const submit = async (request: NewThreadRequest) => {
@@ -124,18 +126,18 @@ function SubthreadComposerBody({ parent }: { parent: PluginSidebarThread }) {
   return (
     <NewThreadComposer
       layout="document"
-      draftKey={`bb-sidebar:subthread:${parent.id}`}
+      draftKey={subthreadDraftKey(parent.id)}
       focusRequest={focusRequest}
       placeholder="What should the subthread do?"
       defaultProjectId={parent.projectId}
       defaultProviderId={parent.providerId}
       {...(defaults
         ? {
-          defaultModel: defaults.model,
-          defaultReasoningLevel: defaults.reasoningLevel,
-          defaultServiceTier: defaults.serviceTier,
-          defaultPermissionMode: defaults.permissionMode,
-        }
+            defaultModel: defaults.model,
+            defaultReasoningLevel: defaults.reasoningLevel,
+            defaultServiceTier: defaults.serviceTier,
+            defaultPermissionMode: defaults.permissionMode,
+          }
         : {})}
       {...(parent.environment?.id
         ? { defaultEnvironment: { type: "reuse" as const, environmentId: parent.environment.id } }

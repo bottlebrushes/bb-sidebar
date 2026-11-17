@@ -1,11 +1,6 @@
 import { useEffect, useMemo, useState, type ComponentProps, type CSSProperties } from "react";
-import {
-  experimental_useSidebarThreadActions as useSidebarThreadActions,
-  useBbNavigate,
-  useRpc,
-  type PluginSidebarThread,
-} from "@get-bb/plugin-sdk/app";
-import { toast } from "sonner";
+import { useBbNavigate, useRpc, type PluginSidebarThread } from "@get-bb/plugin-sdk/app";
+import { toast } from "../../lib/toast";
 import { Icon } from "../../components/Icon";
 import { cn } from "../../lib/utils";
 import type { SidebarProvider } from "../../ProviderGlyph";
@@ -38,13 +33,19 @@ function ToolbarSelect({ className, children, ...props }: ComponentProps<"select
       >
         {children}
       </select>
-      <Icon name="ChevronDown" className="pointer-events-none absolute right-1 size-3 text-muted-foreground" aria-hidden />
+      <Icon
+        name="ChevronDown"
+        className="pointer-events-none absolute right-1 size-3 text-muted-foreground"
+        aria-hidden
+      />
     </span>
   );
 }
 
-type Dialog =
-  | { kind: "block" | "parent" | "duplicate" | "link" | "rename" | "linearProject" | "delete"; item: LayoutCard };
+type Dialog = {
+  kind: "block" | "parent" | "duplicate" | "link" | "rename" | "linearProject" | "delete";
+  item: LayoutCard;
+};
 
 function errorText(error: unknown): string | undefined {
   return error instanceof Error ? error.message : undefined;
@@ -59,7 +60,9 @@ function ErrorLines({ lines }: { lines: string[] }) {
     <div style={{ fontSize: 12, lineHeight: 1.4, display: "grid", gap: 2, minWidth: 0 }}>
       <div>{summary}</div>
       {items.map((line, index) => (
-        <div key={index} style={ERROR_LINE_STYLE} title={line}>{line}</div>
+        <div key={index} style={ERROR_LINE_STYLE} title={line}>
+          {line}
+        </div>
       ))}
     </div>
   );
@@ -100,7 +103,6 @@ export function BoardView({
   onSettleThread(thread: PluginSidebarThread): void;
 }) {
   const rpc = useRpc<typeof boardRpcContract>();
-  const actions = useSidebarThreadActions();
   const navigate = useBbNavigate();
   const { snapshot, error, refresh, patch } = useBoard();
   const [dragging, setDragging] = useState<LayoutCard | null>(null);
@@ -119,43 +121,60 @@ export function BoardView({
   const filters = useBoardFilters();
   const viewerId = snapshot?.linearViewerId ?? null;
   const layout = useMemo(
-    () => (snapshot
-      ? buildLayout({
-          snapshot,
-          threads,
-          projectId,
-          projectNames,
-          isSettled,
-          // `now` only ages settled threads off the board; a refetch is fresh enough.
-          now: Date.now(),
-          includeCard: (card) => {
-            const thread = searching && card.threadId ? threadsById.get(card.threadId) : undefined;
-            return cardPassesFilters(card, {
-              assignee: filters.assignee,
-              linearProject: filters.linearProject,
-              viewerId,
-              search,
-              threadTitle: thread ? threadDisplayTitle(thread) : null,
-            });
-          },
-          hiddenColumns: filters.hiddenColumns,
-          sort: filters.sort,
-        })
-      : { columns: [], columnOptions: [] }),
-    [filters.assignee, filters.hiddenColumns, filters.linearProject, filters.sort, isSettled, projectId, projectNames, search, searching, snapshot, threads, threadsById, viewerId],
+    () =>
+      snapshot
+        ? buildLayout({
+            snapshot,
+            threads,
+            projectId,
+            projectNames,
+            isSettled,
+            // `now` only ages settled threads off the board; a refetch is fresh enough.
+            now: Date.now(),
+            includeCard: (card) => {
+              const thread = searching && card.threadId ? threadsById.get(card.threadId) : undefined;
+              return cardPassesFilters(card, {
+                assignee: filters.assignee,
+                linearProject: filters.linearProject,
+                viewerId,
+                search,
+                threadTitle: thread ? threadDisplayTitle(thread) : null,
+              });
+            },
+            hiddenColumns: filters.hiddenColumns,
+            sort: filters.sort,
+          })
+        : { columns: [], columnOptions: [] },
+    [
+      filters.assignee,
+      filters.hiddenColumns,
+      filters.linearProject,
+      filters.sort,
+      isSettled,
+      projectId,
+      projectNames,
+      search,
+      searching,
+      snapshot,
+      threads,
+      threadsById,
+      viewerId,
+    ],
   );
   const columns = layout.columns;
   const assignees = useMemo(() => {
     const byId = new Map<string, string>();
     for (const card of snapshot?.cards ?? []) {
-      if (card.assignee && (projectId === null || card.projectId === projectId)) byId.set(card.assignee.id, card.assignee.name);
+      if (card.assignee && (projectId === null || card.projectId === projectId))
+        byId.set(card.assignee.id, card.assignee.name);
     }
     return [...byId].filter(([id]) => id !== viewerId).sort((a, b) => a[1].localeCompare(b[1]));
   }, [projectId, snapshot, viewerId]);
   const linearProjects = useMemo(() => {
     const byId = new Map<string, string>();
     for (const card of snapshot?.cards ?? []) {
-      if (card.linearProject && (projectId === null || card.projectId === projectId)) byId.set(card.linearProject.id, card.linearProject.name);
+      if (card.linearProject && (projectId === null || card.projectId === projectId))
+        byId.set(card.linearProject.id, card.linearProject.name);
     }
     return [...byId].sort((a, b) => a[1].localeCompare(b[1]));
   }, [projectId, snapshot]);
@@ -173,7 +192,10 @@ export function BoardView({
     }
     return byParent;
   }, [snapshot]);
-  const columnsById = useMemo(() => new Map((snapshot?.columns ?? []).map((column) => [column.id, column])), [snapshot]);
+  const columnsById = useMemo(
+    () => new Map((snapshot?.columns ?? []).map((column) => [column.id, column])),
+    [snapshot],
+  );
 
   if (!snapshot) {
     return (
@@ -223,11 +245,7 @@ export function BoardView({
     const covering = card.threadId ? null : coveringThreadId(card);
     const threadId = card.threadId ?? covering;
     if (threadId) {
-      // bb's sidebar open only knows threads in the sidebar list; an archived
-      // card thread is not in it, so that click did nothing. Open it by route.
-      const listed = threadsById.get(threadId);
-      if (listed && !listed.isArchived) actions.open(threadId, { split: false });
-      else navigate.toThread(threadId);
+      navigate.toThread(threadId);
       onNavigate();
     } else {
       startThread(card);
@@ -255,20 +273,23 @@ export function BoardView({
         return;
       case "unblock":
         void run("Could not remove the blocker", () =>
-          rpc.call("setBlocked", { blockerCardId: action.blockerCardId, blockedCardId: item.card.id, blocked: false }))
-          .catch(() => {});
+          rpc.call("setBlocked", { blockerCardId: action.blockerCardId, blockedCardId: item.card.id, blocked: false }),
+        ).catch(() => {});
         return;
       case "unduplicate":
         void run("Could not clear the duplicate", () =>
-          rpc.call("setDuplicate", { cardId: action.duplicateCardId, mainCardId: null })).catch(() => {});
+          rpc.call("setDuplicate", { cardId: action.duplicateCardId, mainCardId: null }),
+        ).catch(() => {});
         return;
       case "unparent":
         void run("Could not remove the parent", () =>
-          rpc.call("setParent", { cardId: item.card.id, parentCardId: null })).catch(() => {});
+          rpc.call("setParent", { cardId: item.card.id, parentCardId: null }),
+        ).catch(() => {});
         return;
       case "unlink":
         void run("Could not unlink the thread", () =>
-          rpc.call("linkThread", { cardId: item.card.id, threadId: null })).catch(() => {});
+          rpc.call("linkThread", { cardId: item.card.id, threadId: null }),
+        ).catch(() => {});
         return;
       case "linear":
         if (item.card.linear) navigate.openUrl(item.card.linear.url);
@@ -314,21 +335,39 @@ export function BoardView({
     if (!item.virtual) {
       patch((current: BoardSnapshot) => ({
         ...current,
-        cards: current.cards.map((card) => card.id === item.card.id
-          ? { ...card, columnId, position: before ? before.card.position - 0.0001 : Number.MAX_SAFE_INTEGER / 2 }
-          : card),
+        cards: current.cards.map((card) =>
+          card.id === item.card.id
+            ? { ...card, columnId, position: before ? before.card.position - 0.0001 : Number.MAX_SAFE_INTEGER / 2 }
+            : card,
+        ),
       }));
     }
-    await run("Could not move the card", () => rpc.call("moveCard", item.virtual
-      ? { threadId: item.card.threadId!, projectId: item.card.projectId, columnId, beforeCardId: before?.card.id ?? null }
-      : { cardId: item.card.id, columnId, beforeCardId: before?.card.id ?? null })).catch(() => {});
+    await run("Could not move the card", () =>
+      rpc.call(
+        "moveCard",
+        item.virtual
+          ? {
+              threadId: item.card.threadId!,
+              projectId: item.card.projectId,
+              columnId,
+              beforeCardId: before?.card.id ?? null,
+            }
+          : { cardId: item.card.id, columnId, beforeCardId: before?.card.id ?? null },
+      ),
+    ).catch(() => {});
   };
 
-  const linkedInView = snapshot.projects.filter((project) =>
-    project.linear && (projectId === null || project.projectId === projectId));
+  const linkedInView = snapshot.projects.filter(
+    (project) => project.linear && (projectId === null || project.projectId === projectId),
+  );
   const syncError = linkedInView.find((project) => project.syncError)?.syncError ?? null;
   const lastSynced = linkedInView.reduce<number | null>(
-    (oldest, project) => (project.lastSyncedAt === null ? oldest : oldest === null ? project.lastSyncedAt : Math.min(oldest, project.lastSyncedAt)),
+    (oldest, project) =>
+      project.lastSyncedAt === null
+        ? oldest
+        : oldest === null
+          ? project.lastSyncedAt
+          : Math.min(oldest, project.lastSyncedAt),
     null,
   );
 
@@ -358,7 +397,11 @@ export function BoardView({
           <option value="me">My cards</option>
           <option value="all">Everyone</option>
           <option value="unassigned">Unassigned</option>
-          {assignees.map(([id, name]) => <option key={id} value={`user:${id}`}>{name}</option>)}
+          {assignees.map(([id, name]) => (
+            <option key={id} value={`user:${id}`}>
+              {name}
+            </option>
+          ))}
         </ToolbarSelect>
         {linearProjects.length > 0 || filters.linearProject !== "all" ? (
           <ToolbarSelect
@@ -369,7 +412,11 @@ export function BoardView({
           >
             <option value="all">All projects</option>
             <option value="none">No project</option>
-            {linearProjects.map(([id, name]) => <option key={id} value={`project:${id}`}>{name}</option>)}
+            {linearProjects.map(([id, name]) => (
+              <option key={id} value={`project:${id}`}>
+                {name}
+              </option>
+            ))}
           </ToolbarSelect>
         ) : null}
         <ToolbarSelect
@@ -389,13 +436,25 @@ export function BoardView({
         {linkedInView.length ? (
           <>
             <span className="truncate">
-              Linear: {linkedInView.map((project) => project.linear!.teamKey + (project.linear!.linearProjectName ? ` / ${project.linear!.linearProjectName}` : "")).join(", ")}
+              Linear:{" "}
+              {linkedInView
+                .map(
+                  (project) =>
+                    project.linear!.teamKey +
+                    (project.linear!.linearProjectName ? ` / ${project.linear!.linearProjectName}` : ""),
+                )
+                .join(", ")}
             </span>
             {syncError ? (
-              <span className="truncate text-destructive-text" title={syncError}>Sync failed: {syncError}</span>
+              <span className="truncate text-destructive-text" title={syncError}>
+                Sync failed: {syncError}
+              </span>
             ) : lastSynced ? (
               <span className="shrink-0">
-                synced {relativeTimeLabel(lastSynced, Date.now()) === "now" ? "just now" : `${relativeTimeLabel(lastSynced, Date.now())} ago`}
+                synced{" "}
+                {relativeTimeLabel(lastSynced, Date.now()) === "now"
+                  ? "just now"
+                  : `${relativeTimeLabel(lastSynced, Date.now())} ago`}
               </span>
             ) : null}
             <button
@@ -418,7 +477,9 @@ export function BoardView({
         )}
       </div>
       {searching && columns.every((column) => column.cards.length === 0) ? (
-        <p role="status" className="px-3 py-1 text-[11px] text-muted-foreground">No cards match “{search.trim()}”.</p>
+        <p role="status" className="px-3 py-1 text-[11px] text-muted-foreground">
+          No cards match “{search.trim()}”.
+        </p>
       ) : null}
       <div className="flex min-h-0 flex-1 gap-2 overflow-x-auto px-2 pb-2">
         {columns.map((column) => (
@@ -431,7 +492,10 @@ export function BoardView({
               event.preventDefault();
               event.dataTransfer.dropEffect = "move";
               const target = event.target;
-              if (target === event.currentTarget || (target instanceof HTMLElement && target.dataset.dropTail !== undefined)) {
+              if (
+                target === event.currentTarget ||
+                (target instanceof HTMLElement && target.dataset.dropTail !== undefined)
+              ) {
                 setDropTarget({ key: column.key, index: column.cards.length });
               }
             }}
@@ -441,18 +505,25 @@ export function BoardView({
             }}
           >
             <header className="flex shrink-0 items-center gap-1.5 px-2 pb-1 pt-2 text-xs">
-              <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: column.color ?? CATEGORY_DOT[column.category] }} />
+              <span
+                className="size-2 shrink-0 rounded-full"
+                style={{ backgroundColor: column.color ?? CATEGORY_DOT[column.category] }}
+              />
               <span className="truncate font-semibold text-foreground">{column.name}</span>
               <span className="tabular-nums text-muted-foreground">{column.cards.length}</span>
               {projectId === null && !column.shared ? (
                 <span className="truncate text-[10px] text-muted-foreground">
-                  {Object.keys(column.columnIdByProject).map((id) => projectNames[id] ?? id).join(", ")}
+                  {Object.keys(column.columnIdByProject)
+                    .map((id) => projectNames[id] ?? id)
+                    .join(", ")}
                 </span>
               ) : null}
               <button
                 type="button"
                 aria-label={`New card in ${column.name}`}
-                onClick={() => setCreating({ key: column.key, projectId: Object.keys(column.columnIdByProject)[0]!, title: "" })}
+                onClick={() =>
+                  setCreating({ key: column.key, projectId: Object.keys(column.columnIdByProject)[0]!, title: "" })
+                }
                 className="ml-auto rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
               >
                 <Icon name="Add" className="size-3.5" />
@@ -468,7 +539,8 @@ export function BoardView({
                 onSubmit={async () => {
                   const columnId = column.columnIdByProject[creating.projectId]!;
                   await run("Could not create the card", () =>
-                    rpc.call("createCard", { projectId: creating.projectId, title: creating.title.trim(), columnId }));
+                    rpc.call("createCard", { projectId: creating.projectId, title: creating.title.trim(), columnId }),
+                  );
                   setCreating(null);
                 }}
               />
@@ -478,7 +550,11 @@ export function BoardView({
                 <div
                   key={item.card.id}
                   style={{ paddingLeft: `${Math.min(item.depth, 4) * 12}px` }}
-                  className={cn("relative", item.depth > 0 && "before:absolute before:bottom-1/2 before:top-0 before:border-l before:border-red-500/40")}
+                  className={cn(
+                    "relative",
+                    item.depth > 0 &&
+                      "before:absolute before:bottom-1/2 before:top-0 before:border-l before:border-red-500/40",
+                  )}
                   onDragOver={(event) => {
                     if (!dragging) return;
                     event.preventDefault();
@@ -492,15 +568,20 @@ export function BoardView({
                   <BoardCardView
                     item={item}
                     active={item.card.threadId !== null && item.card.threadId === activeThreadId}
-                    projectName={projectId === null ? projectNames[item.card.projectId] ?? null : null}
-                    projectIconSrc={projectId === null ? projectIconUrl(item.card.projectId, projectIconRevision) : null}
-                    provider={item.thread ? providerById.get(item.thread.providerId) ?? null : null}
+                    projectName={projectId === null ? (projectNames[item.card.projectId] ?? null) : null}
+                    projectIconSrc={
+                      projectId === null ? projectIconUrl(item.card.projectId, projectIconRevision) : null
+                    }
+                    provider={item.thread ? (providerById.get(item.thread.providerId) ?? null) : null}
                     dragging={dragging?.card.id === item.card.id}
                     // A child thread that is a sub-item's own thread shows once, as that sub-item's row.
-                    childThreads={item.card.threadId
-                      ? (childrenByParent.get(item.card.threadId) ?? []).filter((child) =>
-                          !item.subItems.cards.some((sub) => sub.threadId === child.id))
-                      : []}
+                    childThreads={
+                      item.card.threadId
+                        ? (childrenByParent.get(item.card.threadId) ?? []).filter(
+                            (child) => !item.subItems.cards.some((sub) => sub.threadId === child.id),
+                          )
+                        : []
+                    }
                     childrenByParent={childrenByParent}
                     activeThreadId={activeThreadId}
                     childrenExpanded={item.card.threadId !== null && expandedChildParentIds.has(item.card.threadId)}
@@ -508,14 +589,13 @@ export function BoardView({
                     onToggleChildren={() => {
                       if (item.card.threadId) onToggleChildren(item.card.threadId);
                     }}
-                    onOpenThread={(threadId) => {
-                      actions.open(threadId, { split: false });
-                      onNavigate();
-                    }}
+                    onChildThreadOpened={onNavigate}
                     now={now}
-                    onSettle={item.thread && canParkThread(item.thread) && !isSettled(item.thread)
-                      ? () => onSettleThread(item.thread!)
-                      : undefined}
+                    onSettle={
+                      item.thread && canParkThread(item.thread) && !isSettled(item.thread)
+                        ? () => onSettleThread(item.thread!)
+                        : undefined
+                    }
                     onAction={(action) => onAction(item, action)}
                     subCards={subCards}
                     onDragStart={(event) => {
@@ -552,7 +632,11 @@ export function BoardView({
   );
 }
 
-function ColumnFilter({ options, onToggle, onShowAll }: {
+function ColumnFilter({
+  options,
+  onToggle,
+  onShowAll,
+}: {
   options: Array<{ name: string; hidden: boolean; count: number }>;
   onToggle(name: string): void;
   onShowAll(): void;
@@ -581,7 +665,11 @@ function ColumnFilter({ options, onToggle, onShowAll }: {
           ))}
         </ul>
         {hidden.length ? (
-          <button type="button" onClick={onShowAll} className="mt-1 w-full rounded px-2 py-1 text-left text-xs text-muted-foreground hover:bg-accent">
+          <button
+            type="button"
+            onClick={onShowAll}
+            className="mt-1 w-full rounded px-2 py-1 text-left text-xs text-muted-foreground hover:bg-accent"
+          >
             Show all columns
           </button>
         ) : null}
@@ -594,7 +682,14 @@ function DropLine() {
   return <div aria-hidden="true" className="pointer-events-none my-0.5 h-0.5 rounded-full bg-primary" />;
 }
 
-function NewCardForm({ column, projectNames, draft, onChange, onCancel, onSubmit }: {
+function NewCardForm({
+  column,
+  projectNames,
+  draft,
+  onChange,
+  onCancel,
+  onSubmit,
+}: {
   column: LayoutColumn;
   projectNames: Readonly<Record<string, string>>;
   draft: { key: string; projectId: string; title: string };
@@ -611,7 +706,9 @@ function NewCardForm({ column, projectNames, draft, onChange, onCancel, onSubmit
         event.preventDefault();
         if (!draft.title.trim() || busy) return;
         setBusy(true);
-        onSubmit().catch(() => {}).finally(() => setBusy(false));
+        onSubmit()
+          .catch(() => {})
+          .finally(() => setBusy(false));
       }}
     >
       <input
@@ -632,14 +729,27 @@ function NewCardForm({ column, projectNames, draft, onChange, onCancel, onSubmit
           value={draft.projectId}
           onChange={(event) => onChange({ ...draft, projectId: event.target.value })}
         >
-          {projectIds.map((id) => <option key={id} value={id}>{projectNames[id] ?? id}</option>)}
+          {projectIds.map((id) => (
+            <option key={id} value={id}>
+              {projectNames[id] ?? id}
+            </option>
+          ))}
         </ToolbarSelect>
       ) : null}
     </form>
   );
 }
 
-function BoardDialog({ dialog, threads, projectNames, snapshot, cardOptions, ensureCard, run, onClose }: {
+function BoardDialog({
+  dialog,
+  threads,
+  projectNames,
+  snapshot,
+  cardOptions,
+  ensureCard,
+  run,
+  onClose,
+}: {
   dialog: Dialog;
   threads: readonly PluginSidebarThread[];
   projectNames: Readonly<Record<string, string>>;
@@ -655,8 +765,10 @@ function BoardDialog({ dialog, threads, projectNames, snapshot, cardOptions, ens
   const storedId = async (id: string) => {
     if (!id.startsWith("thread:")) return id;
     const threadId = id.slice("thread:".length);
-    const column = snapshot.columns.find((candidate) => candidate.projectId === item.card.projectId && candidate.category === "started")
-      ?? snapshot.columns.find((candidate) => candidate.projectId === item.card.projectId)!;
+    const column =
+      snapshot.columns.find(
+        (candidate) => candidate.projectId === item.card.projectId && candidate.category === "started",
+      ) ?? snapshot.columns.find((candidate) => candidate.projectId === item.card.projectId)!;
     return (await rpc.call("moveCard", { threadId, projectId: item.card.projectId, columnId: column.id })).id;
   };
   switch (dialog.kind) {
@@ -671,7 +783,11 @@ function BoardDialog({ dialog, threads, projectNames, snapshot, cardOptions, ens
           onPick={(id) => {
             void run("Could not mark the card blocked", async () => {
               const card = await ensureCard(item);
-              await rpc.call("setBlocked", { blockerCardId: await storedId(id), blockedCardId: card.id, blocked: true });
+              await rpc.call("setBlocked", {
+                blockerCardId: await storedId(id),
+                blockedCardId: card.id,
+                blocked: true,
+              });
             }).catch(() => {});
           }}
         />
@@ -712,7 +828,10 @@ function BoardDialog({ dialog, threads, projectNames, snapshot, cardOptions, ens
       const carded = new Set(snapshot.cards.flatMap((card) => (card.threadId ? [card.threadId] : [])));
       const options = threads
         .filter((thread) => thread.projectId === item.card.projectId && !thread.isArchived && !carded.has(thread.id))
-        .map((thread) => ({ id: thread.id, label: thread.title?.trim() || thread.titleFallback?.trim() || "Untitled thread" }));
+        .map((thread) => ({
+          id: thread.id,
+          label: thread.title?.trim() || thread.titleFallback?.trim() || "Untitled thread",
+        }));
       return (
         <PickerDialog
           title="Link thread…"
@@ -721,8 +840,9 @@ function BoardDialog({ dialog, threads, projectNames, snapshot, cardOptions, ens
           empty="Every thread in this project already has a card."
           onClose={onClose}
           onPick={(threadId) => {
-            void run("Could not link the thread", () => rpc.call("linkThread", { cardId: item.card.id, threadId }))
-              .catch(() => {});
+            void run("Could not link the thread", () =>
+              rpc.call("linkThread", { cardId: item.card.id, threadId }),
+            ).catch(() => {});
           }}
         />
       );
@@ -735,7 +855,9 @@ function BoardDialog({ dialog, threads, projectNames, snapshot, cardOptions, ens
           initial={item.card.title}
           submitLabel="Rename"
           onClose={onClose}
-          onSubmit={(title) => run("Could not rename the card", () => rpc.call("updateCard", { cardId: item.card.id, title }))}
+          onSubmit={(title) =>
+            run("Could not rename the card", () => rpc.call("updateCard", { cardId: item.card.id, title }))
+          }
         />
       );
     case "linearProject":
@@ -754,7 +876,11 @@ function BoardDialog({ dialog, threads, projectNames, snapshot, cardOptions, ens
 }
 
 /** Puts a Linear card in one of its team's projects (Linear's epics), or takes it out. */
-function LinearProjectDialog({ card, run, onClose }: {
+function LinearProjectDialog({
+  card,
+  run,
+  onClose,
+}: {
   card: BoardCard;
   run(label: string, work: () => Promise<unknown>): Promise<void>;
   onClose(): void;
@@ -763,7 +889,9 @@ function LinearProjectDialog({ card, run, onClose }: {
   const [projects, setProjects] = useState<Array<{ id: string; name: string; state: string }> | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   useEffect(() => {
-    rpc.call("listLinearProjects", { cardId: card.id }).then(setProjects, (error: unknown) => setLoadError(errorText(error) ?? "Could not load Linear projects."));
+    rpc
+      .call("listLinearProjects", { cardId: card.id })
+      .then(setProjects, (error: unknown) => setLoadError(errorText(error) ?? "Could not load Linear projects."));
   }, [rpc, card.id]);
   const options = [
     ...(card.linearProject ? [{ id: "", label: "No project", detail: `Remove from ${card.linearProject.name}` }] : []),
@@ -782,7 +910,8 @@ function LinearProjectDialog({ card, run, onClose }: {
       onClose={onClose}
       onPick={(id) => {
         void run("Could not set the Linear project", () =>
-          rpc.call("setCardLinearProject", { cardId: card.id, linearProjectId: id || null })).catch(() => {});
+          rpc.call("setCardLinearProject", { cardId: card.id, linearProjectId: id || null }),
+        ).catch(() => {});
       }}
     />
   );

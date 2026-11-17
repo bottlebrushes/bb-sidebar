@@ -1,43 +1,20 @@
+import { STORAGE_KEYS } from "./lib/storage-keys";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  type PluginSidebarThread,
-  useRealtime,
-  useRpc,
-} from "@get-bb/plugin-sdk/app";
-import { toast } from "sonner";
-import type { bbSidebarRpcContract } from "./server";
+import { type PluginSidebarThread, useRpc } from "@get-bb/plugin-sdk/app";
+import { errorDetail, toast } from "./lib/toast";
+import type { bbSidebarRpcContract } from "./contract";
+import { useSidebarRead } from "./bb-sdk";
 import { orderInboxThreads } from "./pinned-order";
-import { safeSetItem } from "./lib/safe-storage";
+import { createCachedRpcState } from "./lib/cached-rpc-state";
+import { inboxOrderCodec } from "./lib/inbox-order-codec";
 
-const ORDER_CACHE_KEY = "bb-sidebar:inbox-order-cache:v1";
-const ordersByRpcClient = new WeakMap<object, readonly string[]>();
+const orderCache = createCachedRpcState(STORAGE_KEYS.inboxOrder.key, inboxOrderCodec);
 
-function cachedOrder(rpc: object): readonly string[] | null {
-  const cached = ordersByRpcClient.get(rpc);
-  if (cached) return cached;
-  try {
-    const value: unknown = JSON.parse(
-      window.localStorage.getItem(ORDER_CACHE_KEY) ?? "null",
-    );
-    if (Array.isArray(value) && value.every((id) => typeof id === "string")) {
-      return [...new Set(value)];
-    }
-  } catch {
-    // A missing or unavailable cache falls back to creation order.
-  }
-  return null;
-}
-
-function cacheOrder(rpc: object, ids: readonly string[]): readonly string[] {
-  const order = [...ids];
-  ordersByRpcClient.set(rpc, order);
-  safeSetItem(ORDER_CACHE_KEY, JSON.stringify(order));
-  return order;
-}
-
-export interface InboxReorderApi {
+interface InboxReorderApi {
   threads: PluginSidebarThread[];
   ids: string[];
+  // False until a saved order, cached or fetched, is known.
+  loaded: boolean;
   isReordering: boolean;
   reorder(nextIds: readonly string[]): Promise<boolean>;
 }
@@ -47,42 +24,41 @@ function orderKey(ids: readonly string[]): string {
 }
 
 /** Durable, optimistic inbox ordering backed by the plugin database. */
-export function useInboxReorder(
-  inboxThreads: readonly PluginSidebarThread[],
-): InboxReorderApi {
+export function useInboxReorder(inboxThreads: readonly PluginSidebarThread[]): InboxReorderApi {
   const rpc = useRpc<typeof bbSidebarRpcContract>();
-  const [storedIds, setStoredIds] = useState<readonly string[] | null>(
-    () => cachedOrder(rpc),
-  );
-  const [optimisticIds, setOptimisticIds] = useState<
-    readonly string[] | null
-  >(null);
+  const [saved] = useState(() => orderCache.read(rpc));
+  const { data, error, refresh } = useSidebarRead("listInboxOrder");
+  const serverIds = data?.inboxThreadIds;
+  // The order this client wrote. A read already in flight when the write
+  // lands may predate it, so the written order stands until a read started
+  // after the write answers (`reread`), or for good if that read fails.
+  const [written, setWritten] = useState<{ ids: readonly string[]; reread: boolean } | null>(null);
+  const [optimisticIds, setOptimisticIds] = useState<readonly string[] | null>(null);
   const [isReordering, setIsReordering] = useState(false);
   const inFlight = useRef(false);
-  const requestSeq = useRef(0);
-
-  const refresh = useCallback(async () => {
-    const seq = ++requestSeq.current;
-    try {
-      const result = await rpc.call("listInboxOrder", {});
-      if (seq === requestSeq.current) {
-        setStoredIds(cacheOrder(rpc, result.inboxThreadIds));
-      }
-    } catch {
-      // Keep the cached order if a backend reload briefly races this frontend.
-    }
-  }, [rpc]);
+  const loaded = useRef(false);
+  loaded.current = serverIds !== undefined;
+  const storedIds = written?.ids ?? serverIds ?? saved;
 
   useEffect(() => {
-    void refresh();
-    return () => {
-      requestSeq.current += 1;
-    };
-  }, [refresh]);
+    if (written?.reread && error === null) setWritten(null);
+  }, [written, error, serverIds]);
 
-  useRealtime("inbox-order", () => {
-    void refresh();
-  });
+  useEffect(() => {
+    const current = written?.ids ?? serverIds;
+    if (current) orderCache.write(rpc, [...current]);
+  }, [written, serverIds, rpc]);
+
+  const confirmWrite = useCallback(
+    async (ids: readonly string[], firstLoad: boolean) => {
+      // With data loaded, a refetch cancels a read in flight and starts anew.
+      // A first load in flight is joined instead, so read once more after it.
+      await refresh();
+      if (firstLoad) await refresh();
+      setWritten((current) => (current?.ids === ids ? { ids, reread: true } : current));
+    },
+    [refresh],
+  );
 
   const threads = useMemo(
     () => orderInboxThreads(inboxThreads, optimisticIds ?? storedIds),
@@ -94,8 +70,6 @@ export function useInboxReorder(
     async (nextIds: readonly string[]): Promise<boolean> => {
       if (inFlight.current || orderKey(nextIds) === orderKey(ids)) return false;
       inFlight.current = true;
-      // Any list read that started before this write is stale by definition.
-      requestSeq.current += 1;
       setIsReordering(true);
       setOptimisticIds([...nextIds]);
 
@@ -103,27 +77,23 @@ export function useInboxReorder(
         const result = await rpc.call("reorderInbox", {
           inboxThreadIds: [...nextIds],
         });
-        // Ignore refreshes that raced the write. The mutation response is the
-        // authoritative order for this client.
-        requestSeq.current += 1;
-        setStoredIds(cacheOrder(rpc, result.inboxThreadIds));
+        const ids = result.inboxThreadIds;
+        setWritten({ ids, reread: false });
         setOptimisticIds(null);
+        void confirmWrite(ids, !loaded.current);
         return true;
       } catch (error) {
-        requestSeq.current += 1;
         setOptimisticIds(null);
         void refresh();
-        toast.error("Could not reorder inbox thread", {
-          description: error instanceof Error ? error.message : undefined,
-        });
+        toast.error("Could not reorder inbox thread", { description: errorDetail(error) });
         return false;
       } finally {
         inFlight.current = false;
         setIsReordering(false);
       }
     },
-    [ids, refresh, rpc],
+    [confirmWrite, ids, refresh, rpc],
   );
 
-  return { threads, ids, isReordering, reorder };
+  return { threads, ids, loaded: storedIds !== null, isReordering, reorder };
 }

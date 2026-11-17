@@ -52,9 +52,7 @@ describe("theme", () => {
     const used = new Set<string>();
     for (const path of SOURCES) {
       if (path.endsWith(".css")) continue;
-      for (const match of readFileSync(path, "utf8").matchAll(
-        /var\((--bb-sidebar-[\w-]+)\)/g,
-      )) {
+      for (const match of readFileSync(path, "utf8").matchAll(/var\((--bb-sidebar-[\w-]+)\)/g)) {
         used.add(match[1]!);
       }
     }
@@ -65,6 +63,15 @@ describe("theme", () => {
     }
   });
 
+  // bb's dark --foreground is only a few points above --muted-foreground, so
+  // a Command label in plain foreground would read like the idle age.
+  it("draws Command in the text colour, lifted toward white in dark", () => {
+    const light = cssBlock(THEME_RULES, ":root,\n.light {");
+    const dark = cssBlock(THEME_RULES, ".dark {");
+    expect(light).toMatch(/--bb-sidebar-tone-command:\s*var\(--foreground\);/);
+    expect(dark).toMatch(/--bb-sidebar-tone-command:\s*color-mix\(in oklch, var\(--foreground\) \d+%, white\);/);
+  });
+
   it("keys the stylesheet off bb's theme class, never the OS", () => {
     expect(THEME_RULES).not.toContain("prefers-color-scheme");
     expect(THEME_RULES).toContain(".dark {");
@@ -73,10 +80,7 @@ describe("theme", () => {
   // A font-size utility and an arbitrary colour both start `text-`; the merge
   // has to keep both, which is why the colour carries an explicit `color:`.
   it("keeps a size utility beside an arbitrary tone utility", () => {
-    const merged = cn(
-      "max-w-full truncate text-2xs font-medium",
-      "text-[color:var(--bb-sidebar-tone-error)]",
-    );
+    const merged = cn("max-w-full truncate text-2xs font-medium", "text-[color:var(--bb-sidebar-tone-error)]");
     expect(merged).toContain("text-2xs");
     expect(merged).toContain("text-[color:var(--bb-sidebar-tone-error)]");
   });
@@ -88,7 +92,6 @@ describe("theme", () => {
     if (!existsSync(built)) return;
     const css = readFileSync(built, "utf8");
     expect(css).not.toContain("prefers-color-scheme");
-    expect(css).toContain(".dark .bb-sidebar-theme-light-only");
     expect(css).toMatch(/\.dark\s*\{/);
   });
 });

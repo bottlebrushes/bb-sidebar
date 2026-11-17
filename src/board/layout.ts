@@ -14,7 +14,7 @@ const CATEGORY_RANK: Record<ColumnCategory, number> = {
 };
 
 /** UI id of a thread that has no stored card yet. */
-export const VIRTUAL_PREFIX = "thread:";
+const VIRTUAL_PREFIX = "thread:";
 
 export interface LayoutCard {
   card: BoardCard;
@@ -43,10 +43,7 @@ export interface LayoutCard {
 }
 
 /** The nearest ancestor (by parent) of `card` that has a thread. */
-export function coveringAncestor(
-  card: BoardCard,
-  cardsById: ReadonlyMap<string, BoardCard>,
-): BoardCard | null {
+export function coveringAncestor(card: BoardCard, cardsById: ReadonlyMap<string, BoardCard>): BoardCard | null {
   if (card.threadId) return null;
   const seen = new Set<string>([card.id]);
   let current = card.parentCardId ? cardsById.get(card.parentCardId) : undefined;
@@ -71,7 +68,7 @@ export interface LayoutColumn {
   cards: LayoutCard[];
 }
 
-export interface LayoutInput {
+interface LayoutInput {
   snapshot: BoardSnapshot;
   /** Threads with bb-sidebar's "Sort under" project already applied. */
   threads: readonly PluginSidebarThread[];
@@ -95,7 +92,7 @@ function priorityRank(priority: number): number {
   return priority === 0 ? 5 : priority;
 }
 
-export interface BoardLayout {
+interface BoardLayout {
   columns: LayoutColumn[];
   /** Every column in view, hidden ones included, for the column filter. */
   columnOptions: Array<{ name: string; hidden: boolean; count: number }>;
@@ -144,15 +141,20 @@ export function cardPassesFilters(
     threadTitle: string | null;
   },
 ): boolean {
-  const projectMatches = filter.linearProject === "all"
-    || (filter.linearProject === "none" ? card.linearProject === null : card.linearProject?.id === filter.linearProject.slice("project:".length));
-  return projectMatches
-    && assigneeMatches(card, filter.assignee, filter.viewerId)
-    && cardMatchesSearch(card, filter.search, filter.threadTitle);
+  const projectMatches =
+    filter.linearProject === "all" ||
+    (filter.linearProject === "none"
+      ? card.linearProject === null
+      : card.linearProject?.id === filter.linearProject.slice("project:".length));
+  return (
+    projectMatches &&
+    assigneeMatches(card, filter.assignee, filter.viewerId) &&
+    cardMatchesSearch(card, filter.search, filter.threadTitle)
+  );
 }
 
 /** Days a settled thread stays on the board, like a finished Linear issue. */
-export const SETTLED_THREAD_DAYS = 14;
+const SETTLED_THREAD_DAYS = 14;
 
 /**
  * Cards for threads that have none. An open thread sits in the project's
@@ -160,7 +162,7 @@ export const SETTLED_THREAD_DAYS = 14;
  * Linear team's Done, after states like Staging) until it has been quiet for
  * SETTLED_THREAD_DAYS.
  */
-export function virtualCards(
+function virtualCards(
   snapshot: BoardSnapshot,
   threads: readonly PluginSidebarThread[],
   isSettled: (thread: PluginSidebarThread) => boolean,
@@ -179,9 +181,10 @@ export function virtualCards(
     const settled = isSettled(thread);
     if (settled && now - thread.updatedAt > SETTLED_THREAD_DAYS * 86_400_000) continue;
     const columns = [...(columnsByProject.get(thread.projectId) ?? [])].sort((a, b) => a.position - b.position);
-    const column = (settled
-      ? [...columns].reverse().find((candidate) => candidate.category === "completed")
-      : columns.find((candidate) => candidate.category === "started")) ?? columns[0];
+    const column =
+      (settled
+        ? [...columns].reverse().find((candidate) => candidate.category === "completed")
+        : columns.find((candidate) => candidate.category === "started")) ?? columns[0];
     if (!column) continue;
     cards.push({
       id: `${VIRTUAL_PREFIX}${thread.id}`,
@@ -219,11 +222,13 @@ export function orderColumn(
   isUnread: (card: BoardCard) => boolean = () => false,
 ): Array<{ card: BoardCard; depth: number }> {
   const unread = sort === "priority-unread" ? new Set(cards.filter(isUnread).map((card) => card.id)) : null;
-  const sorted = [...cards].sort((a, b) =>
-    (unread ? Number(unread.has(b.id)) - Number(unread.has(a.id)) : 0)
-    || (sort === "board" ? 0 : priorityRank(a.priority) - priorityRank(b.priority))
-    || a.position - b.position
-    || a.id.localeCompare(b.id));
+  const sorted = [...cards].sort(
+    (a, b) =>
+      (unread ? Number(unread.has(b.id)) - Number(unread.has(a.id)) : 0) ||
+      (sort === "board" ? 0 : priorityRank(a.priority) - priorityRank(b.priority)) ||
+      a.position - b.position ||
+      a.id.localeCompare(b.id),
+  );
   const inColumn = new Set(sorted.map((card) => card.id));
   const index = new Map(sorted.map((card, position) => [card.id, position]));
   const anchor = new Map<string, string>();
@@ -294,8 +299,10 @@ export function buildLayout(input: LayoutInput): BoardLayout {
     const thread = threadsById.get(card.threadId);
     return thread === undefined || thread.isArchived;
   };
-  const inScope = allCards.filter((card) =>
-    (projectId === null || card.projectId === projectId) && !threadGone(card) && (input.includeCard?.(card) ?? true));
+  const inScope = allCards.filter(
+    (card) =>
+      (projectId === null || card.projectId === projectId) && !threadGone(card) && (input.includeCard?.(card) ?? true),
+  );
   const isHiddenCard = (card: BoardCard) => hidden.has(columnsById.get(card.columnId)?.name.trim().toLowerCase() ?? "");
   const shown = new Set(inScope.filter((card) => !isHiddenCard(card)).map((card) => card.id));
   // A sub-item lives under its parent card (the sub-item list) whenever any
@@ -303,7 +310,11 @@ export function buildLayout(input: LayoutInput): BoardLayout {
   const nested = new Set<string>();
   for (const card of inScope) {
     const seen = new Set<string>([card.id]);
-    for (let parentId = card.parentCardId; parentId !== null && !seen.has(parentId); parentId = cardsById.get(parentId)?.parentCardId ?? null) {
+    for (
+      let parentId = card.parentCardId;
+      parentId !== null && !seen.has(parentId);
+      parentId = cardsById.get(parentId)?.parentCardId ?? null
+    ) {
       if (shown.has(parentId)) {
         nested.add(card.id);
         break;
@@ -323,12 +334,14 @@ export function buildLayout(input: LayoutInput): BoardLayout {
     foldedInto.set(main, list);
     return false;
   });
-  const projectsInView = projectId === null
-    ? [...new Set(visibleCards.map((card) => card.projectId))]
-    : [projectId];
+  const projectsInView = projectId === null ? [...new Set(visibleCards.map((card) => card.projectId))] : [projectId];
   const columns = snapshot.columns
     .filter((column) => projectsInView.includes(column.projectId))
-    .sort((a, b) => (projectsInView.length > 1 ? CATEGORY_RANK[a.category] - CATEGORY_RANK[b.category] : 0) || a.position - b.position);
+    .sort(
+      (a, b) =>
+        (projectsInView.length > 1 ? CATEGORY_RANK[a.category] - CATEGORY_RANK[b.category] : 0) ||
+        a.position - b.position,
+    );
 
   const groups = new Map<string, LayoutColumn>();
   const groupOfColumn = new Map<string, LayoutColumn>();
@@ -389,7 +402,7 @@ export function buildLayout(input: LayoutInput): BoardLayout {
       return {
         card,
         virtual: card.id.startsWith(VIRTUAL_PREFIX),
-        thread: card.threadId ? threadsById.get(card.threadId) ?? null : null,
+        thread: card.threadId ? (threadsById.get(card.threadId) ?? null) : null,
         depth,
         blockers: relations
           .filter((relation) => relation.blockedCardId === card.id)
@@ -397,10 +410,10 @@ export function buildLayout(input: LayoutInput): BoardLayout {
         blocking: relations
           .filter((relation) => relation.blockerCardId === card.id)
           .map((relation) => cardsById.get(relation.blockedCardId)!),
-        parent: card.parentCardId ? cardsById.get(card.parentCardId) ?? null : null,
+        parent: card.parentCardId ? (cardsById.get(card.parentCardId) ?? null) : null,
         subItems: { done: items.filter(isDone).length, total: items.length, cards: items },
         duplicates: foldedInto.get(card.id) ?? [],
-        duplicateOf: mainOf.has(card.id) ? cardsById.get(mainOf.get(card.id)!) ?? null : null,
+        duplicateOf: mainOf.has(card.id) ? (cardsById.get(mainOf.get(card.id)!) ?? null) : null,
         coveredBy: covering ? { card: covering, thread: threadsById.get(covering.threadId!) ?? null } : null,
         needsAgent: !card.threadId && !covering && !isDone(card),
       };
@@ -408,13 +421,21 @@ export function buildLayout(input: LayoutInput): BoardLayout {
   }
 
   const projectName = (group: LayoutColumn) =>
-    Object.keys(group.columnIdByProject).map((id) => input.projectNames[id] ?? id).sort()[0] ?? "";
-  const ordered = projectId !== null ? [...groups.values()] : [
-    ...[...groups.values()].filter((group) => group.shared),
-    ...[...groups.values()]
-      .filter((group) => !group.shared)
-      .sort((a, b) => CATEGORY_RANK[a.category] - CATEGORY_RANK[b.category] || projectName(a).localeCompare(projectName(b))),
-  ];
+    Object.keys(group.columnIdByProject)
+      .map((id) => input.projectNames[id] ?? id)
+      .sort()[0] ?? "";
+  const ordered =
+    projectId !== null
+      ? [...groups.values()]
+      : [
+          ...[...groups.values()].filter((group) => group.shared),
+          ...[...groups.values()]
+            .filter((group) => !group.shared)
+            .sort(
+              (a, b) =>
+                CATEGORY_RANK[a.category] - CATEGORY_RANK[b.category] || projectName(a).localeCompare(projectName(b)),
+            ),
+        ];
   const isHidden = (group: LayoutColumn) => hidden.has(group.name.trim().toLowerCase());
   return {
     columns: ordered.filter((group) => !isHidden(group)),

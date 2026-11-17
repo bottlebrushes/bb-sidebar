@@ -1,17 +1,16 @@
 import { useCallback, useState } from "react";
 import type { AssigneeFilter, CardSort, LinearProjectFilter } from "../layout";
+import { STORAGE_KEYS } from "../../lib/storage-keys";
+import { readStorageRaw } from "../../lib/storage-codec";
+import { safeSetItem } from "../../lib/safe-storage";
 
-const ASSIGNEE_KEY = "bb-sidebar:board-assignee:v1";
-const LINEAR_PROJECT_KEY = "bb-sidebar:board-linear-project:v1";
-const HIDDEN_COLUMNS_KEY = "bb-sidebar:board-hidden-columns:v1";
-const SORT_KEY = "bb-sidebar:board-sort:v1";
 /** Linear's "Blocked" state repeats what blocker relations already show. */
 const DEFAULT_HIDDEN_COLUMNS = ["blocked"];
 
 function read<T>(key: string, fallback: T, valid: (value: unknown) => value is T): T {
+  const raw = readStorageRaw(key);
+  if (raw === null) return fallback;
   try {
-    const raw = localStorage.getItem(key);
-    if (raw === null) return fallback;
     const parsed: unknown = JSON.parse(raw);
     return valid(parsed) ? parsed : fallback;
   } catch {
@@ -19,12 +18,9 @@ function read<T>(key: string, fallback: T, valid: (value: unknown) => value is T
   }
 }
 
+// A failed write still applies the filter until reload.
 function write(key: string, value: unknown) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // The filter still applies until reload.
-  }
+  safeSetItem(key, JSON.stringify(value));
 }
 
 const isString = (value: unknown): value is string => typeof value === "string";
@@ -35,37 +31,62 @@ const isStringList = (value: unknown): value is string[] =>
 
 /** The board's assignee, Linear project, and column filters, saved per browser. */
 export function useBoardFilters() {
-  const [assignee, setAssigneeState] = useState<AssigneeFilter>(() => read(ASSIGNEE_KEY, "me", isString));
-  const [linearProject, setLinearProjectState] = useState<LinearProjectFilter>(() => read(LINEAR_PROJECT_KEY, "all", isString));
-  const setLinearProject = useCallback((next: LinearProjectFilter) => {
-    setLinearProjectState(next);
-    write(LINEAR_PROJECT_KEY, next);
-  }, []);
-  const [hiddenColumns, setHiddenState] = useState<ReadonlySet<string>>(
-    () => new Set(read(HIDDEN_COLUMNS_KEY, DEFAULT_HIDDEN_COLUMNS, isStringList)),
+  const { boardAssignee, boardLinearProject, boardHiddenColumns, boardSort } = STORAGE_KEYS;
+  const [assignee, setAssigneeState] = useState<AssigneeFilter>(() => read(boardAssignee.key, "me", isString));
+  const [linearProject, setLinearProjectState] = useState<LinearProjectFilter>(() =>
+    read(boardLinearProject.key, "all", isString),
   );
-  const [sort, setSortState] = useState<CardSort>(() => read(SORT_KEY, "board", isSort));
-  const setSort = useCallback((next: CardSort) => {
-    setSortState(next);
-    write(SORT_KEY, next);
-  }, []);
-  const setAssignee = useCallback((next: AssigneeFilter) => {
-    setAssigneeState(next);
-    write(ASSIGNEE_KEY, next);
-  }, []);
-  const toggleColumn = useCallback((name: string) => {
-    setHiddenState((current) => {
-      const key = name.trim().toLowerCase();
-      const next = new Set(current);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      write(HIDDEN_COLUMNS_KEY, [...next]);
-      return next;
-    });
-  }, []);
+  const setLinearProject = useCallback(
+    (next: LinearProjectFilter) => {
+      setLinearProjectState(next);
+      write(boardLinearProject.key, next);
+    },
+    [boardLinearProject.key],
+  );
+  const [hiddenColumns, setHiddenState] = useState<ReadonlySet<string>>(
+    () => new Set(read(boardHiddenColumns.key, DEFAULT_HIDDEN_COLUMNS, isStringList)),
+  );
+  const [sort, setSortState] = useState<CardSort>(() => read(boardSort.key, "board", isSort));
+  const setSort = useCallback(
+    (next: CardSort) => {
+      setSortState(next);
+      write(boardSort.key, next);
+    },
+    [boardSort.key],
+  );
+  const setAssignee = useCallback(
+    (next: AssigneeFilter) => {
+      setAssigneeState(next);
+      write(boardAssignee.key, next);
+    },
+    [boardAssignee.key],
+  );
+  const toggleColumn = useCallback(
+    (name: string) => {
+      setHiddenState((current) => {
+        const key = name.trim().toLowerCase();
+        const next = new Set(current);
+        if (next.has(key)) next.delete(key);
+        else next.add(key);
+        write(boardHiddenColumns.key, [...next]);
+        return next;
+      });
+    },
+    [boardHiddenColumns.key],
+  );
   const showAllColumns = useCallback(() => {
     setHiddenState(new Set());
-    write(HIDDEN_COLUMNS_KEY, []);
-  }, []);
-  return { assignee, setAssignee, linearProject, setLinearProject, hiddenColumns, toggleColumn, showAllColumns, sort, setSort };
+    write(boardHiddenColumns.key, []);
+  }, [boardHiddenColumns.key]);
+  return {
+    assignee,
+    setAssignee,
+    linearProject,
+    setLinearProject,
+    hiddenColumns,
+    toggleColumn,
+    showAllColumns,
+    sort,
+    setSort,
+  };
 }

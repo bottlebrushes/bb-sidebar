@@ -6,10 +6,10 @@ import { experimental_defineHostEntry } from "@get-bb/plugin-sdk/host";
 import { closeOwnedPortProcesses } from "./close-owned-ports";
 import { portScanContract, type PortRoot } from "./port-scan-contract";
 import { attribute, parseCwds, parseDockerRows, parseListeners } from "./port-scan";
-import type { OpenPort } from "./open-ports";
+import type { OpenPort, ThreadPullRequest } from "./contract";
 import { isBbInternalListener, parseProcessCommands } from "./port-processes";
 import { macProcessEnvironment, threadIdFromEnvironment } from "./port-ownership";
-import { parseGhPullRequest, type ThreadPullRequest } from "./pull-requests";
+import { parseGhPullRequest } from "./pull-requests";
 
 const exec = promisify(execFile);
 
@@ -30,15 +30,22 @@ async function scanPorts(roots: PortRoot[], signal: AbortSignal) {
   if (platform() !== "darwin" && platform() !== "linux") {
     throw new Error("Port discovery requires macOS or Linux");
   }
-  const canonicalRoots = await Promise.all(roots.map(async (root) => ({
-    ...root, path: await realpath(root.path).catch(() => root.path),
-  })));
+  const canonicalRoots = await Promise.all(
+    roots.map(async (root) => ({
+      ...root,
+      path: await realpath(root.path).catch(() => root.path),
+    })),
+  );
   const listeners = parseListeners(await run("lsof", ["-nP", "+c", "0", "-iTCP", "-sTCP:LISTEN"], signal));
   const pids = [...new Set(listeners.map((listener) => listener.pid))];
   const commands = new Map<number, string>();
   for (let start = 0; start < pids.length; start += 100) {
     try {
-      const output = await run("ps", ["ww", "-p", pids.slice(start, start + 100).join(","), "-o", "pid=,args="], signal);
+      const output = await run(
+        "ps",
+        ["ww", "-p", pids.slice(start, start + 100).join(","), "-o", "pid=,args="],
+        signal,
+      );
       for (const [pid, command] of parseProcessCommands(output)) commands.set(pid, command);
     } catch (error) {
       if (signal.aborted) throw error;
@@ -47,17 +54,40 @@ async function scanPorts(roots: PortRoot[], signal: AbortSignal) {
   }
   const cwds = new Map<number, string>();
   if (platform() === "linux") {
-    await Promise.all(pids.map(async (pid) => {
-      try { cwds.set(pid, await readlink(`/proc/${pid}/cwd`)); } catch { /* Exited or inaccessible. */ }
-    }));
+    await Promise.all(
+      pids.map(async (pid) => {
+        try {
+          cwds.set(pid, await readlink(`/proc/${pid}/cwd`));
+        } catch {
+          /* Exited or inaccessible. */
+        }
+      }),
+    );
   } else {
     for (let start = 0; start < pids.length; start += 100) {
-      const batch = await run("lsof", ["-a", "-p", pids.slice(start, start + 100).join(","), "-d", "cwd", "-Fn"], signal);
+      const batch = await run(
+        "lsof",
+        ["-a", "-p", pids.slice(start, start + 100).join(","), "-d", "cwd", "-Fn"],
+        signal,
+      );
       for (const [pid, cwd] of parseCwds(batch)) cwds.set(pid, cwd);
     }
   }
   const ports = new Map<string, OpenPort & { environmentId: string }>();
   const ownerByPid = new Map<number, string | undefined>();
+  const startByPid = new Map<number, string | undefined>();
+  async function processStart(pid: number): Promise<string | undefined> {
+    if (startByPid.has(pid)) return startByPid.get(pid);
+    let startedAt: string | undefined;
+    try {
+      const value = (await run("ps", ["-p", String(pid), "-o", "lstart="], signal)).trim();
+      if (Number.isFinite(Date.parse(value))) startedAt = value;
+    } catch (error) {
+      if (signal.aborted) throw error;
+    }
+    startByPid.set(pid, startedAt);
+    return startedAt;
+  }
   async function ownerThread(pid: number): Promise<string | undefined> {
     if (ownerByPid.has(pid)) return ownerByPid.get(pid);
     let owner: string | undefined;
@@ -95,17 +125,34 @@ async function scanPorts(roots: PortRoot[], signal: AbortSignal) {
     const cwd = cwds.get(listener.pid);
     if (cwd && attribute(cwd, canonicalRoots)) {
       const ownerThreadId = await ownerThread(listener.pid);
-      add(cwd, { ...listener, source: "process", ...(ownerThreadId ? { ownerThreadId } : {}) });
+      const processStartedAt = ownerThreadId ? await processStart(listener.pid) : undefined;
+      add(cwd, {
+        ...listener,
+        source: "process",
+        ...(ownerThreadId ? { ownerThreadId } : {}),
+        ...(processStartedAt ? { processStartedAt } : {}),
+      });
     }
   }
   try {
-    const output = await run("docker", ["ps", "--format", '{{.ID}}\t{{.Names}}\t{{.Ports}}\t{{.Label "com.docker.compose.project.working_dir"}}\t{{.Label "com.docker.compose.service"}}'], signal);
+    const output = await run(
+      "docker",
+      [
+        "ps",
+        "--format",
+        '{{.ID}}\t{{.Names}}\t{{.Ports}}\t{{.Label "com.docker.compose.project.working_dir"}}\t{{.Label "com.docker.compose.service"}}',
+      ],
+      signal,
+    );
     for (const row of parseDockerRows(output)) {
       const cwd = await realpath(row.workingDir).catch(() => row.workingDir);
-      for (const binding of row.ports) add(cwd, {
-        ...binding, source: "docker", container: row.name,
-        ...(row.service ? { service: row.service } : {}),
-      });
+      for (const binding of row.ports)
+        add(cwd, {
+          ...binding,
+          source: "docker",
+          container: row.name,
+          ...(row.service ? { service: row.service } : {}),
+        });
     }
   } catch (error) {
     if (signal.aborted) throw error;
@@ -120,28 +167,45 @@ const GH_PATH = [process.env.PATH, "/opt/homebrew/bin", "/usr/local/bin"].filter
 async function viewPullRequests(urls: string[], signal: AbortSignal) {
   const pullRequests: ThreadPullRequest[] = [];
   let next = 0;
-  await Promise.all(Array.from({ length: Math.min(4, urls.length) }, async () => {
-    while (next < urls.length) {
-      const url = urls[next++]!;
-      try {
-        const { stdout } = await exec("gh", ["pr", "view", url, "--json", "number,title,state,isDraft,url"], {
-          signal, timeout: 10_000, env: { ...process.env, PATH: GH_PATH },
-        });
-        const pullRequest = parseGhPullRequest(stdout);
-        // Keyed by the URL the thread printed, even if the repo was renamed.
-        if (pullRequest) pullRequests.push({ ...pullRequest, url });
-      } catch (error) {
-        if (signal.aborted) throw error;
-        // Missing gh, no access, or a deleted PR: the caller lists it without status.
+  await Promise.all(
+    Array.from({ length: Math.min(4, urls.length) }, async () => {
+      while (next < urls.length) {
+        const url = urls[next++]!;
+        try {
+          const { stdout } = await exec("gh", ["pr", "view", url, "--json", "number,title,state,isDraft,url"], {
+            signal,
+            timeout: 10_000,
+            env: { ...process.env, PATH: GH_PATH },
+          });
+          const pullRequest = parseGhPullRequest(stdout);
+          // Keyed by the URL the thread printed, even if the repo was renamed.
+          if (pullRequest) pullRequests.push({ ...pullRequest, url });
+        } catch (error) {
+          if (signal.aborted) throw error;
+          // Missing gh, no access, or a deleted PR: the caller lists it without status.
+        }
       }
-    }
-  }));
+    }),
+  );
   return { pullRequests };
 }
 
 export default experimental_defineHostEntry({
   contract: portScanContract,
   handlers: {
+    async timeZone() {
+      return { timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone ?? null };
+    },
+    async resolveRoots({ roots }) {
+      return {
+        roots: await Promise.all(
+          roots.map(async (root) => ({
+            environmentId: root.environmentId,
+            path: await realpath(root.path).catch(() => null),
+          })),
+        ),
+      };
+    },
     async scan({ roots }, { signal }) {
       return scanPorts(roots, signal);
     },
@@ -149,9 +213,14 @@ export default experimental_defineHostEntry({
       return viewPullRequests(urls, signal);
     },
     async closeOwnedPorts({ root, threadId, ports, scope }, { signal }) {
-      return closeOwnedPortProcesses(threadId, ports, async () =>
-        (await scanPorts([root], signal)).ports.filter((port) => port.environmentId === root.environmentId),
-        (pid) => { signal.throwIfAborted(); process.kill(pid, "SIGTERM"); },
+      return closeOwnedPortProcesses(
+        threadId,
+        ports,
+        async () => (await scanPorts([root], signal)).ports.filter((port) => port.environmentId === root.environmentId),
+        (pid) => {
+          signal.throwIfAborted();
+          process.kill(pid, "SIGTERM");
+        },
         scope,
       );
     },

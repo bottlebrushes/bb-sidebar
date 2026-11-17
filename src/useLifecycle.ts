@@ -1,34 +1,38 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRealtime, useRpc } from "@get-bb/plugin-sdk/app";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useRpc,
+  useSidebarThreadRowStatus,
+  useSidebarThreadRowStatuses,
+  type PluginSidebarThreadRowStatus,
+} from "@get-bb/plugin-sdk/app";
 import type { PluginSidebarThread } from "@get-bb/plugin-sdk";
-import { toast } from "sonner";
-import type { bbSidebarRpcContract } from "./server";
+import { errorDetail, toast } from "./lib/toast";
+import type { bbSidebarRpcContract } from "./contract";
 import { describeReclaim } from "./reclaim";
 import { promptToCloseSettledPorts } from "./settled-port-prompt";
+import { announcePortsClosed } from "./OpenPorts";
 import {
   canPark,
+  parkBlocker,
+  type ParkBlocker,
   formatSnoozeWakeTime,
-  isThreadWorking,
   nextWakeDelayMs,
-  resolveShelf,
+  resolveRowShelf,
   resolveWakeReason,
-  type ThreadLifecycleRow,
+  sidebarThreadSignals,
   type ThreadShelf,
+  waitsForScheduledContinue,
 } from "./lifecycle";
-import {
-  MAX_CACHED_LIFECYCLE_ROWS,
-  pruneLifecycleRows,
-  safeSetItem,
-} from "./lib/safe-storage";
-
-/** Any live work at all, which blocks parking and wakes a parked thread. */
-export function isWorking(thread: PluginSidebarThread): boolean {
-  return isThreadWorking(thread);
-}
+import { threadsWithAskingDescendants } from "./child-status";
+import { resolveThreadTitlesIn, threadDisplayTitle } from "./inbox";
+import { threadTreeIds } from "./thread-tree";
+import { useLimitActions } from "./RateLimits";
+import type { LifecycleRows } from "./useLifecycleRows";
 
 export interface LifecycleApi {
   shelfFor(thread: PluginSidebarThread): ThreadShelf;
   canPark(thread: PluginSidebarThread): boolean;
+  parkBlocker(thread: PluginSidebarThread): ParkBlocker | null;
   wakeAtFor(thread: PluginSidebarThread): number | null;
   settledAtFor(thread: PluginSidebarThread): number | null;
   wokeFor(thread: PluginSidebarThread): boolean;
@@ -42,84 +46,16 @@ export interface LifecycleApi {
   unsnooze(threadId: string): Promise<boolean>;
 }
 
-type LifecycleMutation =
-  | "park"
-  | "resume"
-  | "settle"
-  | "unsettle"
-  | "snooze"
-  | "unsnooze"
-  | "acknowledgeWake";
+type LifecycleMutation = "park" | "resume" | "settle" | "unsettle" | "snooze" | "unsnooze" | "acknowledgeWake";
 type LifecycleMutationRequest =
   | { method: "snooze"; threadId: string; snoozedUntil: number }
+  | { method: "unsettle"; threadId: string; undoToken?: string }
   | {
-      method: Exclude<LifecycleMutation, "snooze">;
+      method: Exclude<LifecycleMutation, "snooze" | "unsettle">;
       threadId: string;
     };
 
-const lifecycleRowsByRpcClient = new WeakMap<
-  object,
-  ReadonlyMap<string, ThreadLifecycleRow>
->();
-const LIFECYCLE_ROWS_CACHE_KEY = "bb-sidebar:lifecycle-cache:v1";
-
-function isNullableNumber(value: unknown): value is number | null {
-  return (
-    value === null || (typeof value === "number" && Number.isFinite(value))
-  );
-}
-
-function readStoredLifecycleRows(): ReadonlyMap<
-  string,
-  ThreadLifecycleRow
-> | null {
-  try {
-    const stored = window.localStorage.getItem(LIFECYCLE_ROWS_CACHE_KEY);
-    if (!stored) return null;
-    const values = JSON.parse(stored) as unknown;
-    if (!Array.isArray(values)) return null;
-    const rows = new Map<string, ThreadLifecycleRow>();
-    for (const value of values) {
-      if (typeof value !== "object" || value === null) return null;
-      const row = value as Partial<ThreadLifecycleRow>;
-      if (
-        typeof row.threadId !== "string" ||
-        (row.parkedAt !== undefined && !isNullableNumber(row.parkedAt)) ||
-        !isNullableNumber(row.settledAt) ||
-        !isNullableNumber(row.snoozedUntil) ||
-        !isNullableNumber(row.snoozedAt) ||
-        (row.settledOverride !== undefined &&
-          row.settledOverride !== null &&
-          row.settledOverride !== "active" &&
-          row.settledOverride !== "settled")
-      ) {
-        return null;
-      }
-      rows.set(row.threadId, row as ThreadLifecycleRow);
-    }
-    if (rows.size > MAX_CACHED_LIFECYCLE_ROWS) {
-      const pruned = pruneLifecycleRows([...rows.values()]);
-      return new Map(pruned.map((row) => [row.threadId, row] as const));
-    }
-    return rows;
-  } catch {
-    return null;
-  }
-}
-
-function cacheLifecycleRows(
-  rpcClient: object,
-  rows: ReadonlyMap<string, ThreadLifecycleRow>,
-): void {
-  lifecycleRowsByRpcClient.set(rpcClient, rows);
-  const pruned = pruneLifecycleRows([...rows.values()]);
-  safeSetItem(LIFECYCLE_ROWS_CACHE_KEY, JSON.stringify(pruned));
-}
-
-const SUCCESS_MESSAGE: Record<
-  Exclude<LifecycleMutation, "snooze" | "acknowledgeWake">,
-  string
-> = {
+const SUCCESS_MESSAGE: Record<Exclude<LifecycleMutation, "snooze" | "acknowledgeWake">, string> = {
   park: "Thread parked",
   resume: "Thread returned to the inbox",
   settle: "Thread settled",
@@ -148,75 +84,61 @@ const ERROR_MESSAGE: Record<LifecycleMutation, string> = {
   acknowledgeWake: "Could not dismiss Woke marker",
 };
 
-function errorDescription(error: unknown): string | undefined {
-  if (!(error instanceof Error)) return undefined;
-  const message = error.message.trim();
-  return message.length > 0 ? message : undefined;
+/**
+ * Whether another plugin's status on the thread's row runs, such as "Waiting
+ * for CI". Rows then offer no Park, Snooze or Settle for it, as for a thread
+ * that is working. This guard is the UI's alone: the server, automatic settle
+ * and `bb sidebar` never see row statuses, and shelves do not move for it.
+ */
+export function useRowStatusRuns(threadId: string): boolean {
+  return useSidebarThreadRowStatus(threadId)?.tone === "running";
 }
 
 /**
- * Reads the plugin's own lifecycle store and classifies threads onto shelves.
+ * The thread whose running row status stops a park, snooze or settle, if any.
+ * A park or a snooze files one thread, so only its own status counts, as the
+ * working guard reads only the thread. A settle files the whole tree, which
+ * the server refuses while any thread in it is working.
+ */
+function runningRowStatusThread(
+  threadId: string,
+  wholeTree: boolean,
+  threads: readonly PluginSidebarThread[],
+  rowStatuses: ReadonlyMap<string, PluginSidebarThreadRowStatus>,
+): PluginSidebarThread | undefined {
+  const live = threads.filter((thread) => !thread.isArchived);
+  const ids = new Set(wholeTree ? threadTreeIds(live, threadId) : [threadId]);
+  return live.find((thread) => ids.has(thread.id) && rowStatuses.get(thread.id)?.tone === "running");
+}
+
+/**
+ * Classifies threads onto shelves from the plugin's own lifecycle rows.
  *
  * `now` is state, not a render-time clock read: a snooze that elapses must
  * move its row without waiting for an unrelated re-render, and re-reading the
  * clock during render would make the classification unstable.
  */
-export function useLifecycle(
-  threads: readonly PluginSidebarThread[],
-): LifecycleApi {
+export function useLifecycle(threads: readonly PluginSidebarThread[], lifecycleRows: LifecycleRows): LifecycleApi {
+  const recovery = useLimitActions();
   const rpc = useRpc<typeof bbSidebarRpcContract>();
-  const [rows, setRows] = useState<ReadonlyMap<string, ThreadLifecycleRow>>(
-    () =>
-      lifecycleRowsByRpcClient.get(rpc) ??
-      readStoredLifecycleRows() ??
-      new Map(),
-  );
+  const { rows } = lifecycleRows;
   const [now, setNow] = useState(() => Date.now());
+  // Keyed by membership, so the API below keeps its identity across the
+  // thread updates that do not change who is waiting on a child.
+  const askingParentKey = [...threadsWithAskingDescendants(threads)].sort().join("\n");
+  const askingParentIds = useMemo(
+    () => new Set(askingParentKey === "" ? [] : askingParentKey.split("\n")),
+    [askingParentKey],
+  );
 
-  // Responses can land out of order (a mutation's refresh racing a realtime
-  // one), and an older list would silently restore state the user just
-  // changed. Only the newest request may write.
-  const requestSeq = useRef(0);
   const inFlightThreadIds = useRef(new Set<string>());
+  // Read at error time, so the API below keeps its identity across thread updates.
+  const latestThreads = useRef(threads);
+  latestThreads.current = threads;
+  const rowStatuses = useSidebarThreadRowStatuses();
+  const latestRowStatuses = useRef(rowStatuses);
+  latestRowStatuses.current = rowStatuses;
   const portPromptVersions = useRef(new Map<string, number>());
-  const refresh = useCallback(async () => {
-    const seq = ++requestSeq.current;
-    try {
-      const result = await rpc.call("listLifecycle", {});
-      if (seq !== requestSeq.current) return;
-      const nextRows = new Map(
-        result.rows.map((row) => [row.threadId, row] as const),
-      );
-      cacheLifecycleRows(rpc, nextRows);
-      setRows(nextRows);
-    } catch {
-      void 0; // Keep the last known rows during a backend reload or transient RPC
-      // failure. The next realtime signal or mount retries the refresh.
-    }
-  }, [rpc]);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
-
-  // One policy pass per mounted sidebar gives a freshly opened client current
-  // state immediately. The backend coalesces concurrent clients and does the
-  // thread and PR work in one batch.
-  useEffect(() => {
-    void rpc
-      .call("evaluateAutoSettle", {})
-      .then(({ changedThreadIds }) => {
-        if (changedThreadIds.length > 0) void refresh();
-      })
-      .catch(() => {
-        void 0; // A backend generation can briefly lag the app bundle during reload.
-        // The scheduled evaluator and realtime refresh will reconcile later.
-      });
-  }, [refresh, rpc]);
-
-  useRealtime("lifecycle", () => {
-    void refresh();
-  });
 
   // Arm one timer for the soonest wake instead of polling: the shelf empties
   // the moment a snooze expires, and nothing ticks while nothing is snoozed.
@@ -226,9 +148,7 @@ export function useLifecycle(
     // would schedule a new snooze far too late.
     const armedAt = Date.now();
     const delay = nextWakeDelayMs(
-      [...rows.values()].flatMap((row) =>
-        row.snoozedUntil === null ? [] : [row.snoozedUntil],
-      ),
+      [...rows.values()].flatMap((row) => (row.snoozedUntil === null ? [] : [row.snoozedUntil])),
       armedAt,
     );
     if (delay === null) return;
@@ -237,31 +157,43 @@ export function useLifecycle(
   }, [now, rows]);
 
   return useMemo<LifecycleApi>(() => {
-    const signalsFor = (thread: PluginSidebarThread) => ({
-      hasPendingInteraction: thread.hasPendingInteraction,
-      isWorking: isWorking(thread),
-      isUnread: thread.isUnread,
-      latestAttentionAt: thread.latestAttentionAt,
-    });
+    // A descendant's question counts as the parent's own: it brings the tree
+    // back from any shelf, ends a snooze, and blocks parking it again.
+    const signalsFor = (thread: PluginSidebarThread) => {
+      const signals = sidebarThreadSignals(thread);
+      const scheduled = recovery?.rows[thread.id]?.scheduled;
+      if (waitsForScheduledContinue(rows.get(thread.id), scheduled, thread.queuedWork, now)) {
+        signals.hasQueuedWork = false;
+      }
+      return askingParentIds.has(thread.id) ? { ...signals, hasPendingInteraction: true } : signals;
+    };
     // One mutation per thread at a time. The write publishes on the realtime
     // channel, and that subscription refreshes every client after success.
-    const mutate = async (
-      request: LifecycleMutationRequest,
-    ): Promise<boolean> => {
+    const mutate = async (request: LifecycleMutationRequest): Promise<boolean> => {
       const { method, threadId } = request;
+      // Every way to shelve a thread ends here, Undo included.
+      const running =
+        method === "park" || method === "snooze" || method === "settle"
+          ? runningRowStatusThread(threadId, method === "settle", latestThreads.current, latestRowStatuses.current)
+          : undefined;
+      if (running) {
+        const status = latestRowStatuses.current.get(running.id)?.label;
+        toast.error(ERROR_MESSAGE[method], {
+          description: `${threadDisplayTitle(running)} is still running: ${status}`,
+        });
+        return false;
+      }
       if (inFlightThreadIds.current.has(threadId)) return false;
       inFlightThreadIds.current.add(threadId);
       const portPromptVersion = (portPromptVersions.current.get(threadId) ?? 0) + 1;
       portPromptVersions.current.set(threadId, portPromptVersion);
       toast.dismiss(`settled-ports:${threadId}`);
       let parkReminder: string | undefined;
+      let settleUndoToken: string | undefined;
       // An unsnooze clears the row server-side, so its wake time has to be
       // captured before the RPC; Undo re-snoozes with this absolute time to
       // restore the exact schedule that was cancelled.
-      const unsnoozeWakeAt =
-        method === "unsnooze"
-          ? (rows.get(threadId)?.snoozedUntil ?? null)
-          : null;
+      const unsnoozeWakeAt = method === "unsnooze" ? (rows.get(threadId)?.snoozedUntil ?? null) : null;
       try {
         if (method === "snooze") {
           const { reclaim } = await rpc.call("snooze", {
@@ -269,15 +201,23 @@ export function useLifecycle(
             snoozedUntil: request.snoozedUntil,
           });
           parkReminder = describeReclaim(reclaim);
-        } else if (method === "settle" || method === "park") {
-          const { reclaim } = await rpc.call(method, { threadId });
+        } else if (method === "settle") {
+          const { reclaim, undoToken } = await rpc.call("settle", { threadId });
+          settleUndoToken = undoToken;
           parkReminder = describeReclaim(reclaim);
+        } else if (method === "park") {
+          const { reclaim } = await rpc.call("park", { threadId });
+          parkReminder = describeReclaim(reclaim);
+        } else if (method === "unsettle") {
+          await rpc.call("unsettle", { threadId, ...(request.undoToken ? { undoToken: request.undoToken } : {}) });
         } else {
           await rpc.call(method, { threadId });
         }
       } catch (error) {
+        const description = errorDetail(error);
         toast.error(ERROR_MESSAGE[method], {
-          description: errorDescription(error),
+          // The server names threads by their stored titles.
+          description: description && resolveThreadTitlesIn(description, latestThreads.current),
         });
         return false;
       } finally {
@@ -290,10 +230,11 @@ export function useLifecycle(
           duration: parkReminder === undefined ? undefined : PARK_REMINDER_TOAST_MS,
           action: {
             label: "Undo",
-            onClick: () => void mutate({
-              method: method === "park" ? "resume" : "park",
-              threadId,
-            }),
+            onClick: () =>
+              void mutate({
+                method: method === "park" ? "resume" : "park",
+                threadId,
+              }),
           },
         });
       } else if (method === "snooze") {
@@ -301,10 +242,8 @@ export function useLifecycle(
         // snooze releases the same resources a settle does.
         const wakes = `Wakes ${formatSnoozeWakeTime(request.snoozedUntil)}`;
         toast.success("Thread snoozed", {
-          description:
-            parkReminder === undefined ? wakes : `${wakes} · ${parkReminder}`,
-          duration:
-            parkReminder === undefined ? undefined : PARK_REMINDER_TOAST_MS,
+          description: parkReminder === undefined ? wakes : `${wakes} · ${parkReminder}`,
+          duration: parkReminder === undefined ? undefined : PARK_REMINDER_TOAST_MS,
           action: {
             label: "Undo",
             onClick: () => void mutate({ method: "unsnooze", threadId }),
@@ -314,39 +253,41 @@ export function useLifecycle(
         void promptToCloseSettledPorts(
           threadId,
           () => rpc.call("getThreadPorts", { threadId }),
-          (ports) => rpc.call("closeThreadPorts", { threadId, ports }),
+          // Whatever the answer, the row's plug may now be stale.
+          (ports) =>
+            rpc.call("closeThreadPorts", { threadId, ports }).finally(() => {
+              const environmentId = latestThreads.current.find((thread) => thread.id === threadId)?.environment?.id;
+              if (environmentId) announcePortsClosed([environmentId]);
+            }),
           () => portPromptVersions.current.get(threadId) === portPromptVersion,
         );
-        // The reminder is the point of this toast: parking releases the agent
-        // session but leaves any terminal the user typed in alone, and that is
-        // only obvious if it is said out loud. Undo returns the thread to the
-        // inbox; it does not re-pin, because settle never records the pin it
-        // removed.
+        // Undo restores lifecycle rows captured by this action, including the
+        // children's previous shelves. Released resources and pins stay released.
         toast.success(SUCCESS_MESSAGE.settle, {
           description: parkReminder,
-          duration:
-            parkReminder === undefined ? undefined : PARK_REMINDER_TOAST_MS,
-          action: {
-            label: "Undo",
-            onClick: () => void mutate({ method: "unsettle", threadId }),
-          },
+          duration: parkReminder === undefined ? undefined : PARK_REMINDER_TOAST_MS,
+          action: settleUndoToken
+            ? {
+                label: "Undo",
+                onClick: () => void mutate({ method: "unsettle", threadId, undoToken: settleUndoToken }),
+              }
+            : undefined,
         });
       } else if (method === "unsettle") {
-        // Undo re-settles, which re-runs the reclaim a settle always does:
-        // restoring the previous shelf means releasing what a wake restored.
-        toast.success(SUCCESS_MESSAGE.unsettle, {
-          action: {
-            label: "Undo",
-            onClick: () => void mutate({ method: "settle", threadId }),
-          },
+        // A snapshot Undo is final: a generic redo would overwrite children
+        // deliberately preserved by the selective restore.
+        toast.success(request.undoToken ? "Settling undone" : SUCCESS_MESSAGE.unsettle, {
+          action: request.undoToken
+            ? undefined
+            : {
+                label: "Undo",
+                onClick: () => void mutate({ method: "settle", threadId }),
+              },
         });
       } else if (method === "unsnooze") {
         // Undo is only offered while the captured wake time is still ahead;
         // a row whose snooze already elapsed has no schedule left to restore.
-        const undoWakeAt =
-          unsnoozeWakeAt !== null && unsnoozeWakeAt > Date.now()
-            ? unsnoozeWakeAt
-            : null;
+        const undoWakeAt = unsnoozeWakeAt !== null && unsnoozeWakeAt > Date.now() ? unsnoozeWakeAt : null;
         toast.success(SUCCESS_MESSAGE.unsnooze, {
           action:
             undoWakeAt === null
@@ -365,35 +306,20 @@ export function useLifecycle(
       return true;
     };
     return {
-      shelfFor: (thread) => {
-        const row = rows.get(thread.id);
-        // Keep explicit shelf changes visible while the host's unpin update
-        // propagates. The pin RPC clears these rows when pinning succeeds.
-        if (
-          thread.isPinned &&
-          row?.settledOverride !== "settled" &&
-          row?.snoozedUntil == null &&
-          row?.parkedAt == null
-        ) {
-          return "active";
-        }
-        return resolveShelf(row, signalsFor(thread), now);
-      },
+      shelfFor: (thread) => resolveRowShelf(rows.get(thread.id), signalsFor(thread), now, thread.isPinned),
       canPark: (thread) => canPark(signalsFor(thread)),
+      parkBlocker: (thread) => parkBlocker(signalsFor(thread)),
       wakeAtFor: (thread) => rows.get(thread.id)?.snoozedUntil ?? null,
       parkedAtFor: (thread) => rows.get(thread.id)?.parkedAt ?? null,
       park: (threadId) => mutate({ method: "park", threadId }),
       resume: (threadId) => mutate({ method: "resume", threadId }),
       settledAtFor: (thread) => rows.get(thread.id)?.settledAt ?? null,
-      wokeFor: (thread) =>
-        resolveWakeReason(rows.get(thread.id), signalsFor(thread), now) !== null,
-      acknowledgeWake: (threadId) =>
-        mutate({ method: "acknowledgeWake", threadId }),
+      wokeFor: (thread) => resolveWakeReason(rows.get(thread.id), signalsFor(thread), now) !== null,
+      acknowledgeWake: (threadId) => mutate({ method: "acknowledgeWake", threadId }),
       settle: (threadId) => mutate({ method: "settle", threadId }),
       unsettle: (threadId) => mutate({ method: "unsettle", threadId }),
       unsnooze: (threadId) => mutate({ method: "unsnooze", threadId }),
-      snooze: (threadId, snoozedUntil) =>
-        mutate({ method: "snooze", threadId, snoozedUntil }),
+      snooze: (threadId, snoozedUntil) => mutate({ method: "snooze", threadId, snoozedUntil }),
     };
-  }, [now, rows, rpc]);
+  }, [askingParentIds, now, rows, rpc, recovery]);
 }

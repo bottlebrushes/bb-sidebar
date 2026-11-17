@@ -1,9 +1,6 @@
 import { useEffect, useState } from "react";
-import {
-  experimental_useSidebarThreads as useSidebarThreads,
-  useRpc,
-} from "@get-bb/plugin-sdk/app";
-import { toast } from "sonner";
+import { experimental_useSidebarThreads as useSidebarThreads, useRpc } from "@get-bb/plugin-sdk/app";
+import { toast } from "../../lib/toast";
 import { Icon } from "../../components/Icon";
 import type { BoardColumn, BoardProject, boardRpcContract } from "../contract";
 import { COLUMN_CATEGORIES, type ColumnCategory } from "../model";
@@ -39,21 +36,25 @@ export function BoardSettings() {
 
   useEffect(() => {
     if (!snapshot?.linearConfigured || linear) return;
-    rpc.call("listLinearTeams", {}).then(setLinear, (caught: unknown) =>
-      setLinearError(caught instanceof Error ? caught.message : String(caught)));
+    rpc
+      .call("listLinearTeams", {})
+      .then(setLinear, (caught: unknown) => setLinearError(caught instanceof Error ? caught.message : String(caught)));
   }, [linear, rpc, snapshot?.linearConfigured]);
 
   return (
     <section aria-labelledby="settings-board">
       <div className="mb-3">
-        <h2 id="settings-board" className="text-sm font-semibold text-foreground">Board</h2>
+        <h2 id="settings-board" className="text-sm font-semibold text-foreground">
+          Board
+        </h2>
         <p className="mt-1 text-xs leading-5 text-muted-foreground">
-          Drag the sidebar wider than its usual maximum to see the board. Each project has its own columns:
-          local ones you edit here, or a Linear team's workflow, synced both ways.
+          Drag the sidebar wider than its usual maximum to see the board. Each project has its own columns: local ones
+          you edit here, or a Linear team's workflow, synced both ways.
         </p>
         {snapshot && !snapshot.linearConfigured ? (
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            Linear sync needs an API key: <code className="rounded bg-muted px-1">bb plugin config bb-sidebar set linearApiKey &lt;key&gt;</code>
+            Linear sync needs an API key:{" "}
+            <code className="rounded bg-muted px-1">bb plugin config bb-sidebar set linearApiKey &lt;key&gt;</code>
           </p>
         ) : null}
         {linearError ? <p className="mt-1 text-xs text-destructive-text">Linear: {linearError}</p> : null}
@@ -61,25 +62,33 @@ export function BoardSettings() {
       <div className="overflow-hidden rounded-lg border border-border bg-card">
         {!snapshot ? (
           <p className="px-4 py-6 text-center text-sm text-muted-foreground">{error ?? "Loading…"}</p>
-        ) : projects.map((project) => {
-          const boardProject = snapshot.projects.find((candidate) => candidate.projectId === project.id);
-          return (
-            <ProjectBoardRow
-              key={project.id}
-              name={project.isPersonal ? "Personal" : project.name}
-              projectId={project.id}
-              boardProject={boardProject ?? null}
-              columns={snapshot.columns.filter((column) => column.projectId === project.id)}
-              linear={snapshot.linearConfigured ? linear : null}
-            />
-          );
-        })}
+        ) : (
+          projects.map((project) => {
+            const boardProject = snapshot.projects.find((candidate) => candidate.projectId === project.id);
+            return (
+              <ProjectBoardRow
+                key={project.id}
+                name={project.isPersonal ? "Personal" : project.name}
+                projectId={project.id}
+                boardProject={boardProject ?? null}
+                columns={snapshot.columns.filter((column) => column.projectId === project.id)}
+                linear={snapshot.linearConfigured ? linear : null}
+              />
+            );
+          })
+        )}
       </div>
     </section>
   );
 }
 
-function ProjectBoardRow({ name, projectId, boardProject, columns, linear }: {
+function ProjectBoardRow({
+  name,
+  projectId,
+  boardProject,
+  columns,
+  linear,
+}: {
   name: string;
   projectId: string;
   boardProject: BoardProject | null;
@@ -112,73 +121,126 @@ function ProjectBoardRow({ name, projectId, boardProject, columns, linear }: {
         {link ? (
           <>
             <span className="text-xs text-muted-foreground">
-              Linear {link.teamKey}{link.linearProjectName ? ` / ${link.linearProjectName}` : ""} · {link.assignee === "me" ? "my issues" : "all issues"}
+              Linear {link.teamKey}
+              {link.linearProjectName ? ` / ${link.linearProjectName}` : ""} ·{" "}
+              {link.assignee === "me" ? "my issues" : "all issues"}
             </span>
-            <button type="button" disabled={busy} className={buttonClass}
-              onClick={() => void act("Linear sync failed", () => rpc.call("syncNow", { projectId }))}>
+            <button
+              type="button"
+              disabled={busy}
+              className={buttonClass}
+              onClick={() => void act("Linear sync failed", () => rpc.call("syncNow", { projectId }))}
+            >
               <Icon name="Refresh" className="size-3.5" /> Sync now
             </button>
-            <button type="button" disabled={busy} className={buttonClass}
-              onClick={() => void act("Could not unlink", () => rpc.call("setProjectLinear", { projectId, linear: null }))}>
+            <button
+              type="button"
+              disabled={busy}
+              className={buttonClass}
+              onClick={() =>
+                void act("Could not unlink", () => rpc.call("setProjectLinear", { projectId, linear: null }))
+              }
+            >
               Unlink
             </button>
           </>
         ) : linear ? (
           <>
-            <select aria-label={`Linear team for ${name}`} value={teamId} disabled={busy} className={selectClass}
+            <select
+              aria-label={`Linear team for ${name}`}
+              value={teamId}
+              disabled={busy}
+              className={selectClass}
               onChange={(event) => {
                 setTeamId(event.target.value);
                 setLinearProjectId("");
-              }}>
+              }}
+            >
               <option value="">Linear team…</option>
-              {linear.teams.map((team) => <option key={team.id} value={team.id}>{team.key} · {team.name}</option>)}
+              {linear.teams.map((team) => (
+                <option key={team.id} value={team.id}>
+                  {team.key} · {team.name}
+                </option>
+              ))}
             </select>
             {teamId ? (
               <>
-                <select aria-label={`Linear project for ${name}`} value={linearProjectId} disabled={busy} className={selectClass}
-                  onChange={(event) => setLinearProjectId(event.target.value)}>
+                <select
+                  aria-label={`Linear project for ${name}`}
+                  value={linearProjectId}
+                  disabled={busy}
+                  className={selectClass}
+                  onChange={(event) => setLinearProjectId(event.target.value)}
+                >
                   <option value="">Whole team</option>
-                  {linear.projects.filter((candidate) => candidate.teamIds.includes(teamId))
-                    .map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}
+                  {linear.projects
+                    .filter((candidate) => candidate.teamIds.includes(teamId))
+                    .map((candidate) => (
+                      <option key={candidate.id} value={candidate.id}>
+                        {candidate.name}
+                      </option>
+                    ))}
                 </select>
-                <select aria-label={`Linear issues for ${name}`} value={assignee} disabled={busy} className={selectClass}
-                  onChange={(event) => setAssignee(event.target.value === "anyone" ? "anyone" : "me")}>
+                <select
+                  aria-label={`Linear issues for ${name}`}
+                  value={assignee}
+                  disabled={busy}
+                  className={selectClass}
+                  onChange={(event) => setAssignee(event.target.value === "anyone" ? "anyone" : "me")}
+                >
                   <option value="me">My issues</option>
                   <option value="anyone">All issues</option>
                 </select>
-                <button type="button" disabled={busy} className={primaryClass}
-                  onClick={() => void act("Could not link to Linear", () => rpc.call("setProjectLinear", {
-                    projectId,
-                    linear: { teamId, linearProjectId: linearProjectId || null, assignee },
-                  }))}>
+                <button
+                  type="button"
+                  disabled={busy}
+                  className={primaryClass}
+                  onClick={() =>
+                    void act("Could not link to Linear", () =>
+                      rpc.call("setProjectLinear", {
+                        projectId,
+                        linear: { teamId, linearProjectId: linearProjectId || null, assignee },
+                      }),
+                    )
+                  }
+                >
                   {busy ? "Linking…" : "Link"}
                 </button>
               </>
             ) : null}
           </>
         ) : null}
-        <button type="button" className={buttonClass} aria-expanded={editing} onClick={() => setEditing((open) => !open)}>
+        <button
+          type="button"
+          className={buttonClass}
+          aria-expanded={editing}
+          onClick={() => setEditing((open) => !open)}
+        >
           Columns
         </button>
       </div>
       {editing ? (
-        link
-          ? <>
-              <ColumnOrderEditor projectId={projectId} columns={columns} onDone={() => setEditing(false)} />
-              <ShippedColumnsEditor
-                projectId={projectId}
-                columns={columns}
-                shippedStateIds={boardProject?.shippedStateIds ?? null}
-              />
-            </>
-          : <ColumnEditor projectId={projectId} columns={columns} onDone={() => setEditing(false)} />
-        ) : link ? (
+        link ? (
+          <>
+            <ColumnOrderEditor projectId={projectId} columns={columns} onDone={() => setEditing(false)} />
+            <ShippedColumnsEditor
+              projectId={projectId}
+              columns={columns}
+              shippedStateIds={boardProject?.shippedStateIds ?? null}
+            />
+          </>
+        ) : (
+          <ColumnEditor projectId={projectId} columns={columns} onDone={() => setEditing(false)} />
+        )
+      ) : link ? (
         <p className="mt-1 text-xs text-muted-foreground">
-          {boardProject?.syncError
-            ? <span className="text-destructive-text">Sync failed: {boardProject.syncError}</span>
-            : boardProject?.lastSyncedAt
-              ? `Last synced ${new Date(boardProject.lastSyncedAt).toLocaleTimeString()}`
-              : "Not synced yet"}
+          {boardProject?.syncError ? (
+            <span className="text-destructive-text">Sync failed: {boardProject.syncError}</span>
+          ) : boardProject?.lastSyncedAt ? (
+            `Last synced ${new Date(boardProject.lastSyncedAt).toLocaleTimeString()}`
+          ) : (
+            "Not synced yet"
+          )}
           {" · "}
           {columns.map((column) => column.name).join(", ")}
         </p>
@@ -189,14 +251,10 @@ function ProjectBoardRow({ name, projectId, boardProject, columns, linear }: {
   );
 }
 
-function ColumnEditor({ projectId, columns, onDone }: {
-  projectId: string;
-  columns: BoardColumn[];
-  onDone(): void;
-}) {
+function ColumnEditor({ projectId, columns, onDone }: { projectId: string; columns: BoardColumn[]; onDone(): void }) {
   const rpc = useRpc<typeof boardRpcContract>();
-  const [draft, setDraft] = useState<Array<{ id?: string; name: string; category: ColumnCategory }>>(
-    () => columns.map((column) => ({ id: column.id, name: column.name, category: column.category })),
+  const [draft, setDraft] = useState<Array<{ id?: string; name: string; category: ColumnCategory }>>(() =>
+    columns.map((column) => ({ id: column.id, name: column.name, category: column.category })),
   );
   const [saving, setSaving] = useState(false);
   const update = (index: number, change: Partial<(typeof draft)[number]>) =>
@@ -220,45 +278,94 @@ function ColumnEditor({ projectId, columns, onDone }: {
             onChange={(event) => update(index, { name: event.target.value })}
             className="h-8 min-w-0 flex-1 rounded-md border border-border bg-background px-2 text-xs outline-none focus:border-ring focus:ring-1 focus:ring-ring"
           />
-          <select aria-label={`Column ${index + 1} kind`} value={row.category} className={selectClass}
+          <select
+            aria-label={`Column ${index + 1} kind`}
+            value={row.category}
+            className={selectClass}
             onChange={(event) => {
               const category = COLUMN_CATEGORIES.find((candidate) => candidate === event.target.value);
               if (category) update(index, { category });
-            }}>
-            {COLUMN_CATEGORIES.map((category) => <option key={category} value={category}>{CATEGORY_LABELS[category]}</option>)}
+            }}
+          >
+            {COLUMN_CATEGORIES.map((category) => (
+              <option key={category} value={category}>
+                {CATEGORY_LABELS[category]}
+              </option>
+            ))}
           </select>
-          <button type="button" aria-label="Move up" disabled={index === 0} className={buttonClass} onClick={() => move(index, -1)}>
+          <button
+            type="button"
+            aria-label="Move up"
+            disabled={index === 0}
+            className={buttonClass}
+            onClick={() => move(index, -1)}
+          >
             <Icon name="ChevronUp" className="size-3.5" />
           </button>
-          <button type="button" aria-label="Move down" disabled={index === draft.length - 1} className={buttonClass} onClick={() => move(index, 1)}>
+          <button
+            type="button"
+            aria-label="Move down"
+            disabled={index === draft.length - 1}
+            className={buttonClass}
+            onClick={() => move(index, 1)}
+          >
             <Icon name="ChevronDown" className="size-3.5" />
           </button>
-          <button type="button" aria-label={`Remove ${row.name || "column"}`} disabled={draft.length === 1} className={buttonClass}
-            onClick={() => setDraft((rows) => rows.filter((_, position) => position !== index))}>
+          <button
+            type="button"
+            aria-label={`Remove ${row.name || "column"}`}
+            disabled={draft.length === 1}
+            className={buttonClass}
+            onClick={() => setDraft((rows) => rows.filter((_, position) => position !== index))}
+          >
             <Icon name="Delete" className="size-3.5" />
           </button>
         </div>
       ))}
       <div className="flex items-center gap-2">
-        <button type="button" className={buttonClass} disabled={draft.length >= 20}
-          onClick={() => setDraft((rows) => [...rows, { name: "", category: "started" }])}>
+        <button
+          type="button"
+          className={buttonClass}
+          disabled={draft.length >= 20}
+          onClick={() => setDraft((rows) => [...rows, { name: "", category: "started" }])}
+        >
           <Icon name="Add" className="size-3.5" /> Add column
         </button>
-        <span className="flex-1 text-[11px] text-muted-foreground">Cards in a removed column move to the first column of the same kind.</span>
-        <button type="button" className={buttonClass} onClick={onDone}>Cancel</button>
-        <button type="button" disabled={!valid || saving} className={primaryClass}
+        <span className="flex-1 text-[11px] text-muted-foreground">
+          Cards in a removed column move to the first column of the same kind.
+        </span>
+        <button type="button" className={buttonClass} onClick={onDone}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          disabled={!valid || saving}
+          className={primaryClass}
           onClick={() => {
             setSaving(true);
-            rpc.call("setLocalColumns", {
-              projectId,
-              columns: draft.map((row) => ({ ...(row.id ? { id: row.id } : {}), name: row.name.trim(), category: row.category })),
-            }).then(() => {
-              toast.success("Columns saved");
-              onDone();
-            }, (caught: unknown) => {
-              toast.error("Could not save columns", { description: caught instanceof Error ? caught.message : undefined });
-            }).finally(() => setSaving(false));
-          }}>
+            rpc
+              .call("setLocalColumns", {
+                projectId,
+                columns: draft.map((row) => ({
+                  ...(row.id ? { id: row.id } : {}),
+                  name: row.name.trim(),
+                  category: row.category,
+                })),
+              })
+              .then(
+                () => {
+                  toast.success("Columns saved");
+                  onDone();
+                },
+                (caught: unknown) => {
+                  toast.error("Could not save columns", {
+                    description: caught instanceof Error ? caught.message : undefined,
+                  });
+                },
+              )
+              .finally(() => setSaving(false));
+          }}
+        >
           Save
         </button>
       </div>
@@ -267,7 +374,11 @@ function ColumnEditor({ projectId, columns, onDone }: {
 }
 
 /** A Linear-linked project's columns are Linear's states: only their order on the board is ours. */
-function ColumnOrderEditor({ projectId, columns, onDone }: {
+function ColumnOrderEditor({
+  projectId,
+  columns,
+  onDone,
+}: {
   projectId: string;
   columns: BoardColumn[];
   onDone(): void;
@@ -284,12 +395,20 @@ function ColumnOrderEditor({ projectId, columns, onDone }: {
     });
   const save = (columnIds: string[] | null, done: string) => {
     setSaving(true);
-    rpc.call("setColumnOrder", { projectId, columnIds }).then(() => {
-      toast.success(done);
-      onDone();
-    }, (caught: unknown) => {
-      toast.error("Could not reorder columns", { description: caught instanceof Error ? caught.message : undefined });
-    }).finally(() => setSaving(false));
+    rpc
+      .call("setColumnOrder", { projectId, columnIds })
+      .then(
+        () => {
+          toast.success(done);
+          onDone();
+        },
+        (caught: unknown) => {
+          toast.error("Could not reorder columns", {
+            description: caught instanceof Error ? caught.message : undefined,
+          });
+        },
+      )
+      .finally(() => setSaving(false));
   };
 
   return (
@@ -299,47 +418,90 @@ function ColumnOrderEditor({ projectId, columns, onDone }: {
           <span className="h-8 min-w-0 flex-1 truncate rounded-md border border-border bg-background px-2 text-xs leading-8 text-foreground">
             {column.name}
           </span>
-          <button type="button" aria-label={`Move ${column.name} up`} disabled={index === 0} className={buttonClass} onClick={() => move(index, -1)}>
+          <button
+            type="button"
+            aria-label={`Move ${column.name} up`}
+            disabled={index === 0}
+            className={buttonClass}
+            onClick={() => move(index, -1)}
+          >
             <Icon name="ChevronUp" className="size-3.5" />
           </button>
-          <button type="button" aria-label={`Move ${column.name} down`} disabled={index === draft.length - 1} className={buttonClass}
-            onClick={() => move(index, 1)}>
+          <button
+            type="button"
+            aria-label={`Move ${column.name} down`}
+            disabled={index === draft.length - 1}
+            className={buttonClass}
+            onClick={() => move(index, 1)}
+          >
             <Icon name="ChevronDown" className="size-3.5" />
           </button>
         </div>
       ))}
       <div className="flex items-center gap-2">
-        <button type="button" disabled={saving} className={buttonClass} onClick={() => save(null, "Columns follow Linear's order")}>
+        <button
+          type="button"
+          disabled={saving}
+          className={buttonClass}
+          onClick={() => save(null, "Columns follow Linear's order")}
+        >
           Use Linear's order
         </button>
-        <span className="flex-1 text-[11px] text-muted-foreground">Names and states come from Linear; this only changes the board.</span>
-        <button type="button" className={buttonClass} onClick={onDone}>Cancel</button>
-        <button type="button" disabled={saving} className={primaryClass}
-          onClick={() => save(draft.map((column) => column.id), "Column order saved")}>
+        <span className="flex-1 text-[11px] text-muted-foreground">
+          Names and states come from Linear; this only changes the board.
+        </span>
+        <button type="button" className={buttonClass} onClick={onDone}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          disabled={saving}
+          className={primaryClass}
+          onClick={() =>
+            save(
+              draft.map((column) => column.id),
+              "Column order saved",
+            )
+          }
+        >
           Save
         </button>
       </div>
     </div>
   );
 }
-function ShippedColumnsEditor({ projectId, columns, shippedStateIds }: {
+function ShippedColumnsEditor({
+  projectId,
+  columns,
+  shippedStateIds,
+}: {
   projectId: string;
   columns: BoardColumn[];
   shippedStateIds: string[] | null;
 }) {
   const rpc = useRpc<typeof boardRpcContract>();
   const selectable = columns.filter((column) => column.linearStateId !== null);
-  const [draft, setDraft] = useState<string[]>(() => shippedStateIds ?? selectable
-    .filter((column) => column.category === "completed")
-    .map((column) => column.linearStateId!));
+  const [draft, setDraft] = useState<string[]>(
+    () =>
+      shippedStateIds ??
+      selectable.filter((column) => column.category === "completed").map((column) => column.linearStateId!),
+  );
   const [saving, setSaving] = useState(false);
   const save = (linearStateIds: string[] | null, message: string) => {
     setSaving(true);
-    rpc.call("setShippedColumns", { projectId, linearStateIds }).then(() => {
-      toast.success(message);
-    }, (caught: unknown) => {
-      toast.error("Could not save shipped columns", { description: caught instanceof Error ? caught.message : undefined });
-    }).finally(() => setSaving(false));
+    rpc
+      .call("setShippedColumns", { projectId, linearStateIds })
+      .then(
+        () => {
+          toast.success(message);
+        },
+        (caught: unknown) => {
+          toast.error("Could not save shipped columns", {
+            description: caught instanceof Error ? caught.message : undefined,
+          });
+        },
+      )
+      .finally(() => setSaving(false));
   };
 
   return (
@@ -355,21 +517,33 @@ function ShippedColumnsEditor({ projectId, columns, shippedStateIds }: {
               type="checkbox"
               checked={draft.includes(column.linearStateId!)}
               disabled={saving}
-              onChange={(event) => setDraft((current) => event.target.checked
-                ? [...current, column.linearStateId!]
-                : current.filter((id) => id !== column.linearStateId))}
+              onChange={(event) =>
+                setDraft((current) =>
+                  event.target.checked
+                    ? [...current, column.linearStateId!]
+                    : current.filter((id) => id !== column.linearStateId),
+                )
+              }
             />
             {column.name}
           </label>
         ))}
       </div>
       <div className="mt-2 flex items-center gap-2">
-        <button type="button" disabled={saving} className={buttonClass}
-          onClick={() => save(null, "Shipped columns use completed states")}>
+        <button
+          type="button"
+          disabled={saving}
+          className={buttonClass}
+          onClick={() => save(null, "Shipped columns use completed states")}
+        >
           Use completed states
         </button>
-        <button type="button" disabled={saving} className={primaryClass}
-          onClick={() => save(draft, "Shipped columns saved")}>
+        <button
+          type="button"
+          disabled={saving}
+          className={primaryClass}
+          onClick={() => save(draft, "Shipped columns saved")}
+        >
           Save shipped columns
         </button>
       </div>

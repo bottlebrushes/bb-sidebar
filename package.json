@@ -1,6 +1,6 @@
 {
   "name": "bb-plugin-bb-sidebar",
-  "version": "0.2.26",
+  "version": "0.3.12",
   "type": "module",
   "description": "A bb thread sidebar with manual and automatic sorting, snooze, and settle actions.",
   "license": "MIT",
@@ -14,8 +14,8 @@
     "url": "https://github.com/yusuf8834/bb-sidebar/issues"
   },
   "engines": {
-    "bb": ">=0.42.0",
-    "bbPluginSdk": ">=0.4.47"
+    "bb": ">=0.49.0",
+    "bbPluginSdk": ">=0.6.132"
   },
   "bb": {
     "name": "BB Sidebar",
@@ -27,16 +27,13 @@
     "server": "./src/server.ts",
     "host": "./src/ports-host.ts"
   },
-  "keywords": [
-    "bb-plugin",
-    "sidebar",
-    "threads",
-    "inbox",
-    "productivity"
-  ],
+  "keywords": ["bb-plugin", "sidebar", "threads", "inbox", "productivity"],
   "files": [
     "dist",
     "src",
+    "!src/fixtures",
+    "!src/**/*.test.*",
+    "!src/test-*",
     "app.tsx",
     "tsconfig.json",
     "README.md",
@@ -45,46 +42,60 @@
   ],
   "scripts": {
     "build": "bb plugin build",
-    "check": "npm run typecheck && npm test && npm run build",
+    "fixture:db": "node scripts/make-fixture-db.mjs",
+    "check": "npm run lint && npm run format:check && npm run knip && npm run typecheck && npm test && npm run test:scripts && npm run build && node scripts/check-app-bundle.mjs",
     "test": "vitest run --config vitest.config.ts",
-    "typecheck": "tsc --noEmit"
+    "test:scripts": "node --test scripts/bb-compat/*.test.mjs",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome lint . && node scripts/check-import-boundaries.mjs && node scripts/check-file-sizes.mjs",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "knip": "knip --no-config-hints",
+    "prepare": "lefthook install",
+    "test:measure": "node scripts/measure-tests.mjs",
+    "test:stress": "node scripts/measure-tests.mjs --runs 5 --load",
+    "e2e:smoke": "node scripts/e2e-smoke.mjs",
+    "e2e:cli": "node scripts/e2e-cli.mjs",
+    "e2e": "node scripts/e2e/run.mjs"
   },
   "dependencies": {
-    "@formkit/auto-animate": "^0.9.0",
     "@hugeicons/core-free-icons": "^4.1.3",
     "@hugeicons/react": "^1.1.6",
+    "cron-parser": "^5.10.0",
+    "react-day-picker": "^9.14.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@get-bb/plugin-sdk": "0.4.47",
-    "@pierre/diffs": "^1.2.9",
-    "@radix-ui/react-alert-dialog": "^1.1.19",
-    "@radix-ui/react-context-menu": "^2.3.3",
-    "@radix-ui/react-dialog": "^1.1.19",
-    "@radix-ui/react-dropdown-menu": "^2.1.20",
-    "@radix-ui/react-hover-card": "^1.1.19",
-    "@radix-ui/react-menubar": "^1.1.20",
-    "@radix-ui/react-navigation-menu": "^1.2.18",
-    "@radix-ui/react-popover": "^1.1.19",
-    "@radix-ui/react-select": "^2.3.3",
-    "@radix-ui/react-tooltip": "^1.2.12",
+    "@biomejs/biome": "^2.5.15",
+    "@get-bb/plugin-sdk": "0.6.132",
+    "@playwright/test": "1.64.0",
+    "@radix-ui/react-context-menu": "^2.4.1",
+    "@radix-ui/react-dialog": "^1.3.1",
+    "@radix-ui/react-popover": "^1.3.1",
+    "@radix-ui/react-select": "^2.4.1",
+    "@radix-ui/react-tooltip": "^1.4.1",
     "@testing-library/react": "^16.3.2",
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
-    "bb-app": "0.42.1-nightly.33968306807.1",
+    "bb-app": "0.49.0",
     "better-sqlite3": "12.10.0",
-    "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "cron-parser": "^5.10.0",
     "hono": "^4.13.3",
     "jsdom": "^29.0.1",
+    "knip": "^5.88.1",
+    "lefthook": "^2.2.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "sonner": "^1.7.4",
-    "tailwind-merge": "^3.4.0",
+    "tailwind-merge": "^3.7.0",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
-    "vaul": "^1.1.2",
     "vitest": "^4.1.1"
+  },
+  "allowScripts": {
+    "node-pty@1.2.0-beta.15": true,
+    "better-sqlite3@12.10.0": true,
+    "lefthook@2.2.1": true,
+    "@parcel/watcher@2.5.6": true
   }
 }

@@ -2,7 +2,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { usePortalScopeProps } from "../../lib/portal-scope";
 
-export interface PickerOption {
+interface PickerOption {
   id: string;
   label: string;
   /** Secondary text: a Linear identifier, column, or project. */
@@ -16,7 +16,12 @@ const inputClass =
 const buttonClass =
   "h-8 rounded-md border border-border bg-background px-3 text-xs font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50";
 
-function Frame({ title, description, onClose, children }: {
+function Frame({
+  title,
+  description,
+  onClose,
+  children,
+}: {
   title: string;
   description?: string;
   onClose(): void;
@@ -24,7 +29,12 @@ function Frame({ title, description, onClose, children }: {
 }) {
   const portalScope = usePortalScopeProps();
   return (
-    <Dialog.Root open onOpenChange={(open) => { if (!open) onClose(); }}>
+    <Dialog.Root
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
       <Dialog.Portal>
         <Dialog.Overlay {...portalScope} className="fixed inset-0 z-50 bg-black/40" />
         <Dialog.Content {...portalScope} aria-describedby={undefined} className={contentClass}>
@@ -40,7 +50,14 @@ function Frame({ title, description, onClose, children }: {
 }
 
 /** Pick one of `options` by typing part of its label or detail. */
-export function PickerDialog({ title, description, options, empty, onPick, onClose }: {
+export function PickerDialog({
+  title,
+  description,
+  options,
+  empty,
+  onPick,
+  onClose,
+}: {
   title: string;
   description?: string;
   options: readonly PickerOption[];
@@ -52,10 +69,12 @@ export function PickerDialog({ title, description, options, empty, onPick, onClo
   const [highlight, setHighlight] = useState(0);
   const matches = useMemo(() => {
     const words = query.toLowerCase().split(/\s+/u).filter(Boolean);
-    return options.filter((option) => {
-      const text = `${option.label} ${option.detail ?? ""}`.toLowerCase();
-      return words.every((word) => text.includes(word));
-    }).slice(0, 200);
+    return options
+      .filter((option) => {
+        const text = `${option.label} ${option.detail ?? ""}`.toLowerCase();
+        return words.every((word) => text.includes(word));
+      })
+      .slice(0, 200);
   }, [options, query]);
   const pick = (id: string | undefined) => {
     if (id === undefined) return;
@@ -90,25 +109,34 @@ export function PickerDialog({ title, description, options, empty, onPick, onClo
       <ul role="listbox" aria-label={title} className="-mx-1 min-h-0 flex-1 overflow-y-auto">
         {matches.length === 0 ? (
           <li className="px-2 py-6 text-center text-xs text-muted-foreground">{empty}</li>
-        ) : matches.map((option, index) => (
-          <li key={option.id} role="option" aria-selected={index === highlight}>
-            <button
-              type="button"
-              onMouseEnter={() => setHighlight(index)}
-              onClick={() => pick(option.id)}
-              className={`flex w-full min-w-0 items-baseline gap-2 rounded-md px-2 py-1.5 text-left text-sm ${index === highlight ? "bg-accent text-accent-foreground" : ""}`}
-            >
-              <span className="min-w-0 flex-1 truncate">{option.label}</span>
-              {option.detail ? <span className="shrink-0 text-xs text-muted-foreground">{option.detail}</span> : null}
-            </button>
-          </li>
-        ))}
+        ) : (
+          matches.map((option, index) => (
+            <li key={option.id} role="option" aria-selected={index === highlight}>
+              <button
+                type="button"
+                onMouseEnter={() => setHighlight(index)}
+                onClick={() => pick(option.id)}
+                className={`flex w-full min-w-0 items-baseline gap-2 rounded-md px-2 py-1.5 text-left text-sm ${index === highlight ? "bg-accent text-accent-foreground" : ""}`}
+              >
+                <span className="min-w-0 flex-1 truncate">{option.label}</span>
+                {option.detail ? <span className="shrink-0 text-xs text-muted-foreground">{option.detail}</span> : null}
+              </button>
+            </li>
+          ))
+        )}
       </ul>
     </Frame>
   );
 }
 
-export function TextDialog({ title, label, initial, submitLabel, onSubmit, onClose }: {
+export function TextDialog({
+  title,
+  label,
+  initial,
+  submitLabel,
+  onSubmit,
+  onClose,
+}: {
   title: string;
   label: string;
   initial: string;
@@ -130,10 +158,22 @@ export function TextDialog({ title, label, initial, submitLabel, onSubmit, onClo
           onSubmit(trimmed).then(onClose, () => setBusy(false));
         }}
       >
-        <input autoFocus aria-label={label} value={value} onChange={(event) => setValue(event.target.value)} className={inputClass} />
+        <input
+          autoFocus
+          aria-label={label}
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+          className={inputClass}
+        />
         <div className="flex justify-end gap-2">
-          <button type="button" onClick={onClose} className={buttonClass}>Cancel</button>
-          <button type="submit" disabled={!trimmed || busy} className={`${buttonClass} border-transparent bg-primary text-primary-foreground hover:bg-primary/90`}>
+          <button type="button" onClick={onClose} className={buttonClass}>
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={!trimmed || busy}
+            className={`${buttonClass} border-transparent bg-primary text-primary-foreground hover:bg-primary/90`}
+          >
             {submitLabel}
           </button>
         </div>
@@ -142,7 +182,13 @@ export function TextDialog({ title, label, initial, submitLabel, onSubmit, onClo
   );
 }
 
-export function ConfirmDialog({ title, description, confirmLabel, onConfirm, onClose }: {
+export function ConfirmDialog({
+  title,
+  description,
+  confirmLabel,
+  onConfirm,
+  onClose,
+}: {
   title: string;
   description: string;
   confirmLabel: string;
@@ -154,7 +200,9 @@ export function ConfirmDialog({ title, description, confirmLabel, onConfirm, onC
     <Frame title={title} onClose={onClose}>
       <p className="text-xs leading-5 text-muted-foreground">{description}</p>
       <div className="flex justify-end gap-2">
-        <button type="button" onClick={onClose} className={buttonClass}>Cancel</button>
+        <button type="button" onClick={onClose} className={buttonClass}>
+          Cancel
+        </button>
         <button
           type="button"
           autoFocus

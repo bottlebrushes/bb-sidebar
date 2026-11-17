@@ -59,7 +59,9 @@ export function SubCardBadge({
       )}
     >
       <Icon name="ListTodo" className="size-3" aria-hidden />
-      <span className="tabular-nums">{done}/{total}</span>
+      <span className="tabular-nums">
+        {done}/{total}
+      </span>
       <Icon name={expanded ? "ChevronUp" : "ChevronDown"} className="size-3" aria-hidden />
     </button>
   );
@@ -92,7 +94,9 @@ export function SubCardList({
         depth === 0 ? "ml-2.5 mt-1 border-l-[1.5px] border-border pl-1" : "ml-3 border-l-[1.5px] border-border pl-2",
       )}
     >
-      {cards.map((card) => <SubCardRow key={card.id} card={card} lookup={lookup} depth={depth} />)}
+      {cards.map((card) => (
+        <SubCardRow key={card.id} card={card} lookup={lookup} depth={depth} />
+      ))}
     </ul>
   );
 }
@@ -118,9 +122,13 @@ function SubCardRow({ card, lookup, depth }: { card: BoardCard; lookup: SubCardL
           <span
             aria-hidden
             className="size-2 shrink-0 rounded-full"
-            style={{ backgroundColor: column?.color ?? (column ? CATEGORY_DOT[column.category] : CATEGORY_DOT.backlog) }}
+            style={{
+              backgroundColor: column?.color ?? (column ? CATEGORY_DOT[column.category] : CATEGORY_DOT.backlog),
+            }}
           />
-          {card.linear ? <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{card.linear.identifier}</span> : null}
+          {card.linear ? (
+            <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{card.linear.identifier}</span>
+          ) : null}
           <span className="min-w-0 flex-1 truncate text-xs">{card.title}</span>
           {indicator ? <StatusGlyph indicator={indicator} label={null} className="size-2.5 shrink-0" /> : null}
           <span className="max-w-24 shrink-0 truncate pr-2 text-2xs text-muted-foreground">{column?.name}</span>

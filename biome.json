@@ -1,0 +1,204 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.15/schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "files": {
+    "includes": ["**", "!!**/node_modules", "!!**/dist", "!!**/coverage", "!!tmp", "!**/package-lock.json"],
+    "ignoreUnknown": true
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 120
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double",
+      "jsxQuoteStyle": "double",
+      "semicolons": "always",
+      "trailingCommas": "all",
+      "arrowParentheses": "always",
+      "quoteProperties": "asNeeded"
+    },
+    "jsxRuntime": "reactClassic"
+  },
+  "json": {
+    "formatter": {
+      "expand": "auto"
+    }
+  },
+  "assist": {
+    "enabled": false
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "none",
+      "correctness": {
+        "noUnusedImports": "error"
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["app.tsx", "src/**/*.ts", "src/**/*.tsx"],
+      "linter": {
+        "rules": {
+          "style": {
+            "useImportType": "error"
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "app.tsx",
+        "src/*.tsx",
+        "src/components/**",
+        "src/lib/**",
+        "src/use*.ts",
+        "src/project-colors.ts",
+        "src/title-generation-state.ts",
+        "src/sidebar-settings.ts",
+        "src/working-since.ts",
+        "src/working-tree.ts",
+        "src/drag-preview.ts",
+        "src/drag-reorder.ts",
+        "src/drag-reorder-geometry.ts",
+        "src/drag-auto-scroll.ts",
+        "src/settled-port-prompt.ts",
+        "src/bb-sdk.ts"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["**/server", "**/server.*", "**/ports-host", "**/ports-host.*", "**/server-*"],
+                    "message": "Browser/shared modules must not import Node entries, even for types."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "src/*.ts",
+        "!src/*.test.ts",
+        "!src/*.d.ts",
+        "!src/test-*.ts",
+        "!src/use*.ts",
+        "!src/server.ts",
+        "!src/ports-host.ts",
+        "!src/port-scan.ts",
+        "!src/auto-title.ts",
+        "!src/regenerate-title.ts",
+        "!src/port-discovery.ts",
+        "!src/thread-ports.ts",
+        "!src/thread-pull-requests.ts",
+        "!src/thread-tasks.ts",
+        "!src/project-colors.ts",
+        "!src/title-generation-state.ts",
+        "!src/sidebar-settings.ts",
+        "!src/working-since.ts",
+        "!src/working-tree.ts",
+        "!src/drag-preview.ts",
+        "!src/drag-reorder.ts",
+        "!src/drag-reorder-geometry.ts",
+        "!src/drag-auto-scroll.ts",
+        "!src/settled-port-prompt.ts",
+        "!src/server-*.ts",
+        "!src/bb-sdk.ts"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["react", "react/**", "node:*", "node:*/**", "react-dom", "react-dom/**"],
+                    "message": "Shared modules must stay independent of React and Node."
+                  },
+                  {
+                    "group": ["**/server", "**/server.*", "**/ports-host", "**/ports-host.*", "**/server-*"],
+                    "message": "Browser/shared modules must not import Node entries, even for types."
+                  },
+                  {
+                    "group": ["./**/*.tsx", "../**/*.tsx"],
+                    "message": "Shared modules must not import TSX app modules."
+                  },
+                  {
+                    "group": [
+                      "./**/use*",
+                      "../**/use*",
+                      "./**/lib",
+                      "../**/lib",
+                      "./**/lib/**",
+                      "../**/lib/**",
+                      "./**/components",
+                      "../**/components",
+                      "./**/components/**",
+                      "../**/components/**"
+                    ],
+                    "message": "Shared modules must not import browser hooks, lib, or components."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "src/ports-host.ts",
+        "src/port-scan.ts",
+        "src/auto-title.ts",
+        "src/regenerate-title.ts",
+        "src/port-discovery.ts",
+        "src/thread-ports.ts",
+        "src/thread-pull-requests.ts",
+        "src/thread-tasks.ts",
+        "src/server.ts",
+        "src/server-*.ts"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["react", "react/**"],
+                    "message": "Node runtime modules must not import React."
+                  },
+                  {
+                    "group": ["**/*.tsx"],
+                    "message": "Node runtime modules must not import TSX app modules."
+                  },
+                  {
+                    "group": ["**/use*", "**/lib", "**/lib/**", "**/components", "**/components/**"],
+                    "message": "Node runtime modules must not import browser hooks, lib, or components."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

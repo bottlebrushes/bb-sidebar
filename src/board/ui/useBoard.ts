@@ -3,7 +3,7 @@ import { useRealtime, useRpc } from "@get-bb/plugin-sdk/app";
 import type { boardRpcContract, BoardSnapshot } from "../contract";
 import { BOARD_CHANNEL } from "../model";
 
-export interface BoardData {
+interface BoardData {
   snapshot: BoardSnapshot | null;
   error: string | null;
   refresh(): Promise<void>;

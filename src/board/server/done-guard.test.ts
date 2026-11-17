@@ -4,7 +4,12 @@ import { checkDoneMove, type ChildCardState } from "./done-guard";
 
 const DONE = { name: "Done", category: "completed" as const };
 
-function child(ref: string, columnName: string, category: ColumnCategory, threadId: string | null = null): ChildCardState {
+function child(
+  ref: string,
+  columnName: string,
+  category: ColumnCategory,
+  threadId: string | null = null,
+): ChildCardState {
   return { ref, title: `Child ${ref}`, columnName, category, threadId };
 }
 
@@ -26,21 +31,33 @@ describe("checkDoneMove", () => {
   });
 
   it("allows Done once every child is Done or Canceled, and with no children", () => {
-    const finished = [child("TRA-2", "Done", "completed"), child("TRA-3", "Canceled", "canceled"), child("TRA-4", "Duplicate", "canceled")];
+    const finished = [
+      child("TRA-2", "Done", "completed"),
+      child("TRA-3", "Canceled", "canceled"),
+      child("TRA-4", "Duplicate", "canceled"),
+    ];
     expect(checkDoneMove({ cardRef: "TRA-1", target: DONE, children: finished })).toBeNull();
     expect(checkDoneMove({ cardRef: "TRA-1", target: DONE, children: [] })).toBeNull();
   });
 
   it("checks every completed column by category, not by name", () => {
     const open = [child("TRA-2", "In Progress", "started")];
-    expect(checkDoneMove({ cardRef: "TRA-1", target: { name: "Staging", category: "completed" }, children: open })).not.toBeNull();
-    expect(checkDoneMove({ cardRef: "TRA-1", target: { name: "Done", category: "started" }, children: open })).toBeNull();
+    expect(
+      checkDoneMove({ cardRef: "TRA-1", target: { name: "Staging", category: "completed" }, children: open }),
+    ).not.toBeNull();
+    expect(
+      checkDoneMove({ cardRef: "TRA-1", target: { name: "Done", category: "started" }, children: open }),
+    ).toBeNull();
   });
 
   it("never refuses a move to Canceled or to an open column", () => {
     const open = [child("TRA-2", "In Progress", "started"), child("TRA-3", "Todo", "unstarted")];
-    expect(checkDoneMove({ cardRef: "TRA-1", target: { name: "Canceled", category: "canceled" }, children: open })).toBeNull();
-    expect(checkDoneMove({ cardRef: "TRA-1", target: { name: "In Review", category: "started" }, children: open })).toBeNull();
+    expect(
+      checkDoneMove({ cardRef: "TRA-1", target: { name: "Canceled", category: "canceled" }, children: open }),
+    ).toBeNull();
+    expect(
+      checkDoneMove({ cardRef: "TRA-1", target: { name: "In Review", category: "started" }, children: open }),
+    ).toBeNull();
   });
 
   it("lists each open child with its column and thread, and keys the open set", () => {

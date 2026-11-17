@@ -1,6 +1,3 @@
-import type { BbPluginApi } from "@get-bb/plugin-sdk";
-import { z } from "zod";
-
 /**
  * Thread and machine states bb's sidebar snapshot does not distinguish, read
  * on the server so the sidebar can draw them (see `resolveOverlay` in
@@ -23,33 +20,31 @@ export const THREAD_STATES = ["host-reconnecting", "waiting-for-host", "queued"]
 export const PAUSED_HOST_PHASES = ["suspending", "suspended", "resuming"] as const;
 export type PausedHostPhase = (typeof PAUSED_HOST_PHASES)[number];
 
-export const threadStateSchema = z
-  .object({
-    threadId: z.string(),
-    kind: z.enum(THREAD_STATES),
-    /** A queue that has not drained for STALL_AFTER_MS. */
-    stalled: z.boolean(),
-    /** When bb stops waiting for a reconnecting host; null when unbounded. */
-    graceExpiresAt: z.number().nullable(),
-  })
-  .strict();
-export type ThreadState = z.infer<typeof threadStateSchema>;
+export interface ThreadState {
+  threadId: string;
+  kind: (typeof THREAD_STATES)[number];
+  /** A queue that has not drained for STALL_AFTER_MS. */
+  stalled: boolean;
+  /** When bb stops waiting for a reconnecting host; null when unbounded. */
+  graceExpiresAt: number | null;
+}
 
-export const pausedHostSchema = z
-  .object({ hostId: z.string(), phase: z.enum(PAUSED_HOST_PHASES) })
-  .strict();
-export type PausedHost = z.infer<typeof pausedHostSchema>;
+interface PausedHost {
+  hostId: string;
+  phase: PausedHostPhase;
+}
 
-export const runtimeOverlaySnapshotSchema = z
-  .object({ threads: z.array(threadStateSchema), hosts: z.array(pausedHostSchema) })
-  .strict();
-export type RuntimeOverlaySnapshot = z.infer<typeof runtimeOverlaySnapshotSchema>;
+export interface RuntimeOverlaySnapshot {
+  threads: ThreadState[];
+  hosts: PausedHost[];
+}
 
 export interface ThreadRuntimeRow {
   id: string;
   /** Queued follow-ups: still waiting to start, or failed to send. */
   queuedWork: "none" | "waiting" | "failed";
-  runtime: { displayStatus: string; hostReconnectGraceExpiresAt: number | null };
+  /** bb 0.49 no longer reports a reconnect grace; older servers did. */
+  runtime: { displayStatus: string; hostReconnectGraceExpiresAt?: number | null };
 }
 
 /**
@@ -104,8 +99,8 @@ export function threadStates(
   const states: ThreadState[] = [];
   const queuedNow = new Set<string>();
   for (const thread of threads) {
-    const { displayStatus, hostReconnectGraceExpiresAt } = thread.runtime;
-    const graceExpiresAt = hostReconnectGraceExpiresAt;
+    const graceExpiresAt = thread.runtime.hostReconnectGraceExpiresAt ?? null;
+    const { displayStatus } = thread.runtime;
     if (displayStatus === "host-reconnecting" || displayStatus === "waiting-for-host") {
       states.push({ threadId: thread.id, kind: displayStatus, stalled: false, graceExpiresAt });
       continue;
@@ -130,41 +125,4 @@ export function pausedHosts(hosts: readonly HostLifecycleRow[]): PausedHost[] {
     }
   }
   return paused;
-}
-
-/** Every open window polls this; one listing serves them all for a few seconds. */
-const CACHE_MS = 3_000;
-
-export function createRuntimeOverlayLookup(bb: BbPluginApi) {
-  const queuedSince = new Map<string, number>();
-  let cached: RuntimeOverlaySnapshot = { threads: [], hosts: [] };
-  let listedAt = -Infinity;
-  let pending: Promise<RuntimeOverlaySnapshot> | null = null;
-
-  async function list(): Promise<RuntimeOverlaySnapshot> {
-    const threads: ThreadRuntimeRow[] = [];
-    const pageSize = 500;
-    for (let offset = 0; ; offset += pageSize) {
-      const page = await bb.sdk.threads.list({ archived: false, includeHidden: true, limit: pageSize, offset });
-      threads.push(...page);
-      if (page.length < pageSize) break;
-    }
-    const hosts: readonly HostLifecycleRow[] = await bb.sdk.hosts.list();
-    return { threads: threadStates(threads, Date.now(), queuedSince), hosts: pausedHosts(hosts) };
-  }
-
-  return function getRuntimeOverlays(): Promise<RuntimeOverlaySnapshot> {
-    if (pending) return pending;
-    if (Date.now() - listedAt < CACHE_MS) return Promise.resolve(cached);
-    pending = list()
-      .then((snapshot) => {
-        cached = snapshot;
-        listedAt = Date.now();
-        return snapshot;
-      })
-      .finally(() => {
-        pending = null;
-      });
-    return pending;
-  };
 }

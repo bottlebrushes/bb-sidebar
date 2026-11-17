@@ -1,4 +1,4 @@
-import type { PluginSidebarThread } from "@get-bb/plugin-sdk";
+import type { PluginSidebarThread, PluginSidebarThreadActivity } from "@get-bb/plugin-sdk";
 
 /**
  * The parked / settled / snoozed lifecycle, as pure functions over stored rows.
@@ -25,7 +25,9 @@ export interface ThreadLifecycleRow {
 /** The activity signals that outrank a user's parking decision. */
 export interface ThreadActivitySignals {
   hasPendingInteraction: boolean;
-  /** Any live work: runtime, workflows, background agents, plan, goals. */
+  /** A message waits to be sent, or one failed to send. */
+  hasQueuedWork: boolean;
+  /** Any live work: runtime, workflows, background agents, plan. */
   isWorking: boolean;
   isUnread: boolean;
   /** Newest attention timestamp bb reports for the thread. */
@@ -33,7 +35,7 @@ export interface ThreadActivitySignals {
 }
 
 export type ThreadShelf = "active" | "parked" | "snoozed" | "settled";
-export type WakeReason = "timer" | "attention";
+type WakeReason = "timer" | "attention";
 
 /**
  * Why a snoozed thread is back in the active inbox, if it has woken at all.
@@ -53,46 +55,118 @@ export function resolveWakeReason(
   }
 
   const wokeOnAttention =
-    signals.hasPendingInteraction ||
-    (row.snoozedAt !== null && signals.latestAttentionAt > row.snoozedAt);
+    signals.hasPendingInteraction || (row.snoozedAt !== null && signals.latestAttentionAt > row.snoozedAt);
   if (wokeOnAttention) return "attention";
   return row.snoozedUntil <= now ? "timer" : null;
 }
 
 /**
- * Whether a thread may be parked at all.
+ * Whether a thread may be parked at all: the one rule manual parking and
+ * automatic settle share.
  *
  * bb has more kinds of live work than a single session status — workflows,
- * background agents, background commands, plan mode, goals — and every one of
- * them must block parking. Hiding a thread that is still working is the one
- * failure this feature cannot afford.
+ * background agents, background commands, plan mode — and every one of them
+ * must block parking. Hiding a thread that is still working is the one
+ * failure this feature cannot afford. A queued message is work about to
+ * start, and a failed one is something the user has not seen go nowhere yet.
  */
-export function canPark(signals: ThreadActivitySignals): boolean {
-  return !signals.hasPendingInteraction && !signals.isWorking;
+export function canPark(signals: ParkSignals): boolean {
+  return parkBlocker(signals) === null;
+}
+
+type ParkSignals = Pick<ThreadActivitySignals, "hasPendingInteraction" | "hasQueuedWork" | "isWorking">;
+export type ParkBlocker = "working" | "question" | "queued";
+
+/** Why `canPark` refuses a thread, or null when it allows it. */
+export function parkBlocker(signals: ParkSignals): ParkBlocker | null {
+  if (signals.isWorking) return "working";
+  if (signals.hasPendingInteraction) return "question";
+  if (signals.hasQueuedWork) return "queued";
+  return null;
+}
+
+/** A turn bb has accepted and not yet finished, in either thread view. */
+export function isTurnInFlight(status: PluginSidebarThread["status"]): boolean {
+  return status === "active" || status === "pending" || status === "starting" || status === "stopping";
+}
+
+/**
+ * Any live work at all: a turn in flight or any of bb's activity counters.
+ *
+ * The one definition the sidebar and automatic settle share. They read it from
+ * different bb views, so each passes its own turn signal, but the counters
+ * that make a thread busy must never differ between them.
+ */
+function hasLiveWork(activity: PluginSidebarThreadActivity, turnInFlight: boolean): boolean {
+  return (
+    turnInFlight ||
+    activity.workflows > 0 ||
+    activity.backgroundAgents > 0 ||
+    activity.backgroundCommands > 0 ||
+    activity.planMode > 0
+  );
+}
+
+/** The activity counts on bb's project-thread row, which server code reads. */
+interface ThreadRowActivity {
+  activeBackgroundAgentCount: number;
+  activeBackgroundCommandCount: number;
+  activePlanModeCount: number;
+  activeWorkflowCount: number;
+}
+
+/**
+ * A project-thread row's counts in the sidebar view's activity shape, so
+ * server code and the sidebar judge live work over the same fields.
+ */
+function rowActivity(activity: ThreadRowActivity): PluginSidebarThreadActivity {
+  return {
+    workflows: activity.activeWorkflowCount,
+    backgroundAgents: activity.activeBackgroundAgentCount,
+    backgroundCommands: activity.activeBackgroundCommandCount,
+    planMode: activity.activePlanModeCount,
+  };
+}
+
+/** The fields of bb's project-thread row, which server code reads, that block parking. */
+export interface ThreadRowWork {
+  activity: ThreadRowActivity;
+  hasPendingInteraction: boolean;
+  queuedWork: "failed" | "none" | "waiting";
+  status: PluginSidebarThread["status"];
+}
+
+/** The parking signals for bb's project-thread row: the server's `sidebarThreadSignals`. */
+export function rowParkSignals(thread: ThreadRowWork): ParkSignals {
+  return {
+    hasPendingInteraction: thread.hasPendingInteraction,
+    hasQueuedWork: thread.queuedWork !== "none",
+    isWorking: hasLiveWork(rowActivity(thread.activity), isTurnInFlight(thread.status)),
+  };
 }
 
 /** Any live work at all, which blocks parking and wakes a parked thread. */
 export function isThreadWorking(thread: PluginSidebarThread): boolean {
-  const { activity } = thread;
-  return (
-    activity.workflows > 0 ||
-    activity.backgroundAgents > 0 ||
-    activity.backgroundCommands > 0 ||
-    activity.planMode > 0 ||
-    activity.goals > 0 ||
-    thread.indicator === "runtime" ||
-    thread.indicator === "working-draft"
-  );
+  // The turn status as well as the indicator: bb paints attention before
+  // work, so an unread thread whose turn is still running shows no runtime
+  // indicator, while a monitor keeps the runtime indicator between turns.
+  return hasLiveWork(thread.activity, isTurnInFlight(thread.status) || thread.indicator === "runtime");
+}
+
+/** The parking signals for a sidebar thread. */
+export function sidebarThreadSignals(thread: PluginSidebarThread): ThreadActivitySignals {
+  return {
+    hasPendingInteraction: thread.hasPendingInteraction,
+    hasQueuedWork: thread.queuedWork !== "none",
+    isWorking: isThreadWorking(thread),
+    isUnread: thread.isUnread,
+    latestAttentionAt: thread.latestAttentionAt,
+  };
 }
 
 /** Whether a sidebar thread is idle enough for archive and parking actions. */
 export function canParkThread(thread: PluginSidebarThread): boolean {
-  return canPark({
-    hasPendingInteraction: thread.hasPendingInteraction,
-    isWorking: isThreadWorking(thread),
-    isUnread: thread.isUnread,
-    latestAttentionAt: thread.latestAttentionAt,
-  });
+  return canPark(sidebarThreadSignals(thread));
 }
 
 /**
@@ -129,6 +203,47 @@ export function resolveShelf(
   return "active";
 }
 
+/**
+ * Whether a thread's queued message is the sidebar's own scheduled Continue,
+ * which its snooze is waiting for. That message does not count as queued
+ * work: the thread stays Snoozed until the Continue is sent. Any other queued
+ * work, or a Continue that failed, keeps the thread visible.
+ */
+export function waitsForScheduledContinue(
+  row: Pick<ThreadLifecycleRow, "snoozedUntil"> | undefined,
+  scheduled: { sendAt: number; failed: boolean } | null | undefined,
+  queuedWork: string,
+  now: number,
+): boolean {
+  return (
+    !!scheduled &&
+    scheduled.sendAt > now &&
+    !scheduled.failed &&
+    queuedWork !== "failed" &&
+    row?.snoozedUntil === scheduled.sendAt
+  );
+}
+
+/**
+ * The shelf a thread's own sidebar row sits on.
+ *
+ * A pinned thread stays in Active unless the user filed it away explicitly:
+ * that keeps a shelf change visible while bb's unpin update propagates, and
+ * the pin RPC clears these rows when pinning succeeds. A child shown inside
+ * its parent's row takes the parent's shelf instead (see `shelfRowIds`).
+ */
+export function resolveRowShelf(
+  row: ThreadLifecycleRow | undefined,
+  signals: ThreadActivitySignals,
+  now: number,
+  isPinned: boolean,
+): ThreadShelf {
+  if (isPinned && row?.settledOverride !== "settled" && row?.snoozedUntil == null && row?.parkedAt == null) {
+    return "active";
+  }
+  return resolveShelf(row, signals, now);
+}
+
 const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * HOUR_MS;
@@ -142,10 +257,7 @@ type CalendarSnoozeDay = "evening" | "tomorrow" | "next-week";
 export type ConfiguredSnoozePreset = {
   id: string;
   label: string;
-} & (
-  | { durationMs: number }
-  | { calendar: CalendarSnoozeDay; hour: number; minute: number }
-);
+} & ({ durationMs: number } | { calendar: CalendarSnoozeDay; hour: number; minute: number });
 
 export function configuredSnoozePresetError(configured: string): string | null {
   const entries = configured
@@ -190,11 +302,8 @@ function parseSnoozePresetEntries(source: string): ConfiguredSnoozePreset[] {
     .flatMap<ConfiguredSnoozePreset>((part, index) => {
       const separator = part.indexOf("=");
       const customLabel = separator >= 0 ? part.slice(0, separator).trim() : "";
-      const value = (separator >= 0 ? part.slice(separator + 1) : part)
-        .trim()
-        .toLowerCase();
-      const calendar =
-        /^(evening|tomorrow|next-week)(?:@(\d{1,2}):(\d{2}))?$/.exec(value);
+      const value = (separator >= 0 ? part.slice(separator + 1) : part).trim().toLowerCase();
+      const calendar = /^(evening|tomorrow|next-week)(?:@(\d{1,2}):(\d{2}))?$/.exec(value);
       if (calendar) {
         const day = calendar[1] as CalendarSnoozeDay;
         const defaultHour = day === "evening" ? 18 : 9;
@@ -222,17 +331,11 @@ function parseSnoozePresetEntries(source: string): ConfiguredSnoozePreset[] {
       const amount = Number(match[1]);
       const unit = match[2] as keyof typeof DURATION_UNIT_MS;
       const durationMs = amount * DURATION_UNIT_MS[unit];
-      if (
-        !Number.isFinite(durationMs) ||
-        durationMs < MINUTE_MS ||
-        durationMs > 365 * DAY_MS
-      ) {
+      if (!Number.isFinite(durationMs) || durationMs < MINUTE_MS || durationMs > 365 * DAY_MS) {
         return [];
       }
 
-      const displayedAmount = Number.isInteger(amount)
-        ? String(amount)
-        : String(Number(amount.toFixed(2)));
+      const displayedAmount = Number.isInteger(amount) ? String(amount) : String(Number(amount.toFixed(2)));
       const generatedLabel = `${displayedAmount} ${DURATION_UNIT_LABEL[unit]}${amount === 1 ? "" : "s"}`;
       return [
         {
@@ -244,13 +347,9 @@ function parseSnoozePresetEntries(source: string): ConfiguredSnoozePreset[] {
     });
 }
 
-export function parseConfiguredSnoozePresets(
-  configured: string,
-): ConfiguredSnoozePreset[] {
+export function parseConfiguredSnoozePresets(configured: string): ConfiguredSnoozePreset[] {
   const parsed = parseSnoozePresetEntries(configured);
-  return parsed.length > 0
-    ? parsed
-    : parseSnoozePresetEntries(DEFAULT_SNOOZE_PRESET_CONFIG);
+  return parsed.length > 0 ? parsed : parseSnoozePresetEntries(DEFAULT_SNOOZE_PRESET_CONFIG);
 }
 
 /**
@@ -268,11 +367,7 @@ export function snoozeWakeLabel(snoozedUntil: number, now: number): string {
 }
 
 /** Full local wake time for confirmation feedback after a snooze. */
-export function formatSnoozeWakeTime(
-  snoozedUntil: number,
-  locale?: string,
-  timeZone?: string,
-): string {
+export function formatSnoozeWakeTime(snoozedUntil: number, locale?: string, timeZone?: string): string {
   return new Intl.DateTimeFormat(locale, {
     dateStyle: "medium",
     timeStyle: "short",
@@ -285,15 +380,11 @@ export function formatSnoozeWakeTime(
  * stale date. Calendar times follow the selecting device's local timezone.
  * An evening that has passed is unavailable, rather than silently tomorrow.
  */
-export function resolveConfiguredSnoozePreset(
-  preset: ConfiguredSnoozePreset,
-  now = new Date(),
-): number | null {
+export function resolveConfiguredSnoozePreset(preset: ConfiguredSnoozePreset, now = new Date()): number | null {
   if ("durationMs" in preset) return now.getTime() + preset.durationMs;
 
-  const addDays = preset.calendar === "next-week"
-    ? (1 - now.getDay() + 7) % 7 || 7
-    : preset.calendar === "tomorrow" ? 1 : 0;
+  const addDays =
+    preset.calendar === "next-week" ? (1 - now.getDay() + 7) % 7 || 7 : preset.calendar === "tomorrow" ? 1 : 0;
   const wake = new Date(now);
   // Use calendar-day arithmetic to preserve the local hour across DST.
   wake.setDate(wake.getDate() + addDays);
@@ -308,12 +399,53 @@ export function resolveConfiguredSnoozePreset(
  */
 export const MAX_TIMEOUT_MS = 2_147_483_647;
 
-export function nextWakeDelayMs(
-  snoozedUntilValues: readonly number[],
-  now: number,
-): number | null {
+export function nextWakeDelayMs(snoozedUntilValues: readonly number[], now: number): number | null {
   const upcoming = snoozedUntilValues.filter((value) => value > now);
   if (upcoming.length === 0) return null;
   const soonest = Math.min(...upcoming);
   return Math.min(Math.max(0, soonest - now) + 50, MAX_TIMEOUT_MS);
+}
+
+/** The latest wake a picked date may set; presets share the same one-year cap. */
+export const MAX_SNOOZE_MS = 365 * DAY_MS;
+
+/**
+ * Where the date-and-time picker starts: tomorrow at 9:00, the same default as
+ * the "Tomorrow morning" shortcut.
+ */
+export function defaultPickedSnooze(now = new Date()): { date: Date; time: string } {
+  const date = new Date(now);
+  date.setDate(date.getDate() + 1);
+  date.setHours(0, 0, 0, 0);
+  return { date, time: "09:00" };
+}
+
+/**
+ * Combine a picked calendar day with an `HH:MM` time, in the device's local
+ * timezone. Null when the time is malformed; the caller decides whether the
+ * result is far enough in the future.
+ */
+export function combineSnoozeDateTime(date: Date, time: string): number | null {
+  const match = /^(\d{2}):(\d{2})$/.exec(time);
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (hour > 23 || minute > 59) return null;
+  const wake = new Date(date);
+  wake.setHours(hour, minute, 0, 0);
+  return wake.getTime();
+}
+
+/** Picker preview: "Sun, Oct 4, 9:00 AM", with the year only when it differs. */
+export function formatPickedSnooze(snoozedUntil: number, now = new Date(), locale?: string, timeZone?: string): string {
+  const wake = new Date(snoozedUntil);
+  return new Intl.DateTimeFormat(locale, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    ...(wake.getFullYear() !== now.getFullYear() ? { year: "numeric" } : {}),
+    hour: "numeric",
+    minute: "2-digit",
+    ...(timeZone ? { timeZone } : {}),
+  }).format(wake);
 }

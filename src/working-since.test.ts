@@ -1,73 +1,31 @@
 import { describe, expect, it } from "vitest";
 import type { PluginSidebarThread } from "@get-bb/plugin-sdk/app";
+import { sidebarThread } from "./test-fixtures";
 import { reconcileWorkingSince, statusWithDuration } from "./working-since";
 
 const NOW = 1_000_000_000;
 const MINUTE = 60_000;
 
-function thread(
-  overrides: Partial<PluginSidebarThread> = {},
-): PluginSidebarThread {
-  return {
-    id: "thr_1",
-    projectId: "proj_1",
-    title: "A thread",
-    titleFallback: null,
-    parentThreadId: null,
-    sectionId: null,
-    originKind: null,
-    originPluginId: null,
-    providerId: "codex",
-    hasPendingInteraction: false,
-    activity: {
-      workflows: 0,
-      backgroundAgents: 0,
-      backgroundCommands: 0,
-      planMode: 0,
-      goals: 0,
-    },
-    indicator: "none",
-    indicatorLabel: null,
-    isUnread: false,
-    isPinned: false,
-    isArchived: false,
-    environment: null,
-    host: null,
-    createdAt: NOW - 10 * MINUTE,
-    updatedAt: NOW - MINUTE,
-    lastReadAt: null,
-    latestAttentionAt: NOW - MINUTE,
-    ...overrides,
-  };
+function thread(overrides: Partial<PluginSidebarThread> = {}): PluginSidebarThread {
+  const times = { createdAt: NOW - 10 * MINUTE, updatedAt: NOW - MINUTE, latestAttentionAt: NOW - MINUTE };
+  return sidebarThread({ ...times, lastReadAt: null, ...overrides });
 }
 
 describe("reconcileWorkingSince", () => {
   it("stamps a thread the first time it is seen working", () => {
-    const next = reconcileWorkingSince(
-      new Map(),
-      [thread({ id: "a", indicator: "runtime" })],
-      NOW,
-    );
+    const next = reconcileWorkingSince(new Map(), [thread({ id: "a", indicator: "runtime" })], NOW);
     expect(next.get("a")).toBe(NOW);
   });
 
   it("keeps the original stamp while the thread stays busy", () => {
     const first = new Map([["a", NOW - 5 * MINUTE]]);
-    const next = reconcileWorkingSince(
-      first,
-      [thread({ id: "a", indicator: "runtime" })],
-      NOW,
-    );
+    const next = reconcileWorkingSince(first, [thread({ id: "a", indicator: "runtime" })], NOW);
     expect(next.get("a")).toBe(NOW - 5 * MINUTE);
   });
 
   it("returns the same map when nothing changed, so no render is spent", () => {
     const first = new Map([["a", NOW - 5 * MINUTE]]);
-    const next = reconcileWorkingSince(
-      first,
-      [thread({ id: "a", indicator: "runtime" }), thread({ id: "b" })],
-      NOW,
-    );
+    const next = reconcileWorkingSince(first, [thread({ id: "a", indicator: "runtime" }), thread({ id: "b" })], NOW);
     expect(next).toBe(first);
   });
 
@@ -78,11 +36,7 @@ describe("reconcileWorkingSince", () => {
       ["a", NOW - 5 * MINUTE],
       ["gone", NOW - 5 * MINUTE],
     ]);
-    const next = reconcileWorkingSince(
-      first,
-      [thread({ id: "a", indicator: "waiting-for-input" })],
-      NOW,
-    );
+    const next = reconcileWorkingSince(first, [thread({ id: "a", indicator: "waiting-for-input" })], NOW);
     expect(next.size).toBe(0);
   });
 
@@ -97,7 +51,6 @@ describe("reconcileWorkingSince", () => {
             backgroundAgents: 1,
             backgroundCommands: 0,
             planMode: 0,
-            goals: 0,
           },
         }),
       ],
@@ -105,16 +58,23 @@ describe("reconcileWorkingSince", () => {
     );
     expect(next.get("a")).toBe(NOW);
   });
+
+  // The display rule no longer counts a disconnected machine as working; the
+  // clock keeps the lifecycle rule, so the stretch survives the outage.
+  it("keeps the stamp while the thread's machine is disconnected and after it comes back", () => {
+    const running = thread({ id: "a", status: "active", runtimeStatus: "active", indicator: "runtime" });
+    const offline = thread({ id: "a", status: "active", runtimeStatus: "waiting-for-host", indicator: "none" });
+    const started = reconcileWorkingSince(new Map(), [running], NOW);
+    const away = reconcileWorkingSince(started, [offline], NOW + 5 * MINUTE);
+    expect(away).toBe(started);
+    expect(reconcileWorkingSince(away, [running], NOW + 10 * MINUTE).get("a")).toBe(NOW);
+  });
 });
 
 describe("statusWithDuration", () => {
   it("appends the elapsed bucket after a minute", () => {
-    expect(statusWithDuration("Working", NOW - 5 * MINUTE, NOW)).toBe(
-      "Working · 5m",
-    );
-    expect(statusWithDuration("Planning", NOW - 3 * 60 * MINUTE, NOW)).toBe(
-      "Planning · 3h",
-    );
+    expect(statusWithDuration("Working", NOW - 5 * MINUTE, NOW)).toBe("Working · 5m");
+    expect(statusWithDuration("Planning", NOW - 3 * 60 * MINUTE, NOW)).toBe("Planning · 3h");
   });
 
   it("stays bare under a minute, and without a stamp", () => {

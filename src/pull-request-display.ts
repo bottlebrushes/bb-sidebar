@@ -1,17 +1,17 @@
-import type { PluginSidebarPullRequest } from "@get-bb/plugin-sdk/app";
-import type { ThreadPullRequest } from "./pull-requests";
+import type { ThreadPullRequest } from "./contract";
+import type { EnvironmentPullRequest, PullRequestAttention, PullRequestState } from "./github-pr-status";
 
 /**
- * A PR as the sidebar draws it. Only the live branch PR from bb carries
- * `attention`; PRs found in the thread's history have just a state, and none
- * when `gh` could not look them up.
+ * A PR as the sidebar draws it. Only the live branch PR from GitHub PR Status
+ * carries `attention`; PRs found in the thread's history have just a state,
+ * and none when `gh` could not look them up.
  */
-export type DisplayPullRequest = {
+type DisplayPullRequest = {
   number: number;
   title: string | null;
   url: string;
-  state: PluginSidebarPullRequest["state"] | null;
-  attention?: PluginSidebarPullRequest["attention"];
+  state: PullRequestState | null;
+  attention?: PullRequestAttention;
 };
 
 export function pullRequestStatusLabel(pullRequest: DisplayPullRequest): string {
@@ -28,6 +28,8 @@ export function pullRequestStatusLabel(pullRequest: DisplayPullRequest): string 
       return "Conflicts";
     case "ready_to_merge":
       return "Ready to merge";
+    case "queued":
+      return "In merge queue";
     case "review_requested":
       return "Review requested";
     case "draft":
@@ -36,8 +38,9 @@ export function pullRequestStatusLabel(pullRequest: DisplayPullRequest): string 
       return "Merged";
     case "closed":
       return "Closed";
-    case "none":
-    case undefined:
+    // `none`, history entries without attention, and values newer than this
+    // sidebar fall back to the state.
+    default:
       if (!pullRequest.state) return "Status unavailable";
       return pullRequest.state[0]!.toUpperCase() + pullRequest.state.slice(1);
   }
@@ -55,10 +58,7 @@ export function pullRequestToneClass(pullRequest: DisplayPullRequest): string {
   ) {
     return "text-[color:var(--bb-sidebar-pr-alert)]";
   }
-  if (
-    pullRequest.state === "draft" ||
-    pullRequest.attention === "draft"
-  ) {
+  if (pullRequest.state === "draft" || pullRequest.attention === "draft") {
     return "text-muted-foreground/60";
   }
   if (pullRequest.state === "closed" || pullRequest.attention === "closed") {
@@ -71,14 +71,14 @@ export function pullRequestToneClass(pullRequest: DisplayPullRequest): string {
 }
 
 /**
- * The thread's PRs newest first. The live branch PR from bb has the richer
- * status, so it replaces its history entry. bb reports it per workspace, so in
- * a shared checkout it may belong to another thread; it leads the list only
- * when the workspace is the thread's own worktree (a PR opened outside
- * `gh pr create`).
+ * The thread's PRs newest first. The live branch PR from GitHub PR Status has
+ * the richer status, so it replaces its history entry. It is reported per
+ * workspace, so in a shared checkout it may belong to another thread; it
+ * leads the list only when the workspace is the thread's own worktree (a PR
+ * opened outside `gh pr create`).
  */
 export function mergeThreadPullRequests(
-  current: PluginSidebarPullRequest | null,
+  current: EnvironmentPullRequest | null,
   history: readonly ThreadPullRequest[],
   ownsWorkspace: boolean,
 ): DisplayPullRequest[] {
@@ -86,5 +86,5 @@ export function mergeThreadPullRequests(
   if (!history.some((pullRequest) => pullRequest.url === current.url)) {
     return ownsWorkspace ? [current, ...history] : [...history];
   }
-  return history.map((pullRequest) => pullRequest.url === current.url ? current : pullRequest);
+  return history.map((pullRequest) => (pullRequest.url === current.url ? current : pullRequest));
 }

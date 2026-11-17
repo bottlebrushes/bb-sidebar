@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useRealtime, useRpc } from "@get-bb/plugin-sdk/app";
-import type { bbSidebarRpcContract } from "./server";
-import { THREAD_PROJECTS_CHANNEL } from "./thread-projects";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRealtime, useRpc, type PluginSidebarThread } from "@get-bb/plugin-sdk/app";
+import type { bbSidebarRpcContract } from "./contract";
+import { placeThreadsInProjects, THREAD_PROJECTS_CHANNEL } from "./thread-projects";
 
 const EMPTY: ReadonlyMap<string, string> = new Map();
 
@@ -10,7 +10,7 @@ const EMPTY: ReadonlyMap<string, string> = new Map();
  * the realtime channel. Only the newest load may land, so overlapping loads
  * cannot roll the view back.
  */
-export function useThreadProjects(): ReadonlyMap<string, string> {
+function useThreadProjects(): ReadonlyMap<string, string> {
   const rpc = useRpc<typeof bbSidebarRpcContract>();
   const loadRequestSeq = useRef(0);
   const [placements, setPlacements] = useState(EMPTY);
@@ -34,4 +34,13 @@ export function useThreadProjects(): ReadonlyMap<string, string> {
     void load();
   });
   return placements;
+}
+
+/** The threads as this sidebar files them: a stored placement wins over bb's own project. */
+export function usePlacedThreads(
+  threads: readonly PluginSidebarThread[],
+  projects: readonly { id: string }[],
+): readonly PluginSidebarThread[] {
+  const placements = useThreadProjects();
+  return useMemo(() => placeThreadsInProjects(threads, placements, projects), [threads, placements, projects]);
 }

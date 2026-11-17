@@ -1,12 +1,9 @@
+import { useSidebarThreads } from "./bb-sdk";
 import { useEffect, useRef, useState } from "react";
 import * as ContextMenu from "@radix-ui/react-context-menu";
-import {
-  experimental_useSidebarThreads as useSidebarThreads,
-  useRpc,
-  type PluginSidebarThread,
-} from "@get-bb/plugin-sdk/app";
-import { toast } from "sonner";
-import type { bbSidebarRpcContract } from "./server";
+import { useRpc, type PluginSidebarThread } from "@get-bb/plugin-sdk/app";
+import { errorDetail, toast } from "./lib/toast";
+import type { bbSidebarRpcContract } from "./contract";
 import { Icon } from "./components/Icon";
 import { threadDisplayTitle } from "./inbox";
 import { usePortalScopeProps } from "./lib/portal-scope";
@@ -33,9 +30,7 @@ export function ParentThreadMenu({ thread }: { thread: PluginSidebarThread }) {
   const candidates = parentCandidates(threads, thread)
     .map((candidate) => {
       const isOtherProject = candidate.projectId !== thread.projectId;
-      const projectName = isOtherProject
-        ? projectNameById.get(candidate.projectId) ?? candidate.projectId
-        : null;
+      const projectName = isOtherProject ? (projectNameById.get(candidate.projectId) ?? candidate.projectId) : null;
       const threadTitle = threadDisplayTitle(candidate);
       return {
         id: candidate.id,
@@ -47,42 +42,45 @@ export function ParentThreadMenu({ thread }: { thread: PluginSidebarThread }) {
         updatedAt: candidate.updatedAt,
       };
     })
-    .filter((candidate) =>
-      candidate.title.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()),
-    )
-    .sort((left, right) =>
-      Number(left.isOtherProject) - Number(right.isOtherProject) ||
-      right.updatedAt - left.updatedAt ||
-      left.id.localeCompare(right.id),
+    .filter((candidate) => candidate.title.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
+    .sort(
+      (left, right) =>
+        Number(left.isOtherProject) - Number(right.isOtherProject) ||
+        right.updatedAt - left.updatedAt ||
+        left.id.localeCompare(right.id),
     );
-  const choices = [
-    { id: "", title: "None", projectName: null, threadTitle: "None", isPinned: false },
-    ...candidates,
-  ];
+  const choices = [{ id: "", title: "None", projectName: null, threadTitle: "None", isPinned: false }, ...candidates];
   const updateParent = async (parentThreadId: string | null) => {
     if (inFlight.current || parentThreadId === thread.parentThreadId) return;
     inFlight.current = true;
     setSaving(true);
     try {
-      await rpc.call("setThreadParent", { threadId: thread.id, parentThreadId });
-      toast.success(parentThreadId === null ? "Parent removed" : "Parent updated");
+      const result = await rpc.call("setThreadParent", { threadId: thread.id, parentThreadId });
+      if (result.unpinFailed) {
+        toast.error("Parent updated, but unpinning could not be confirmed", {
+          description: "If the thread is still pinned, choose Unpin manually.",
+        });
+      } else {
+        toast.success(parentThreadId === null ? "Parent removed" : "Parent updated");
+      }
     } catch (error) {
-      toast.error("Could not update parent", {
-        description: error instanceof Error ? error.message : undefined,
-      });
+      toast.error("Could not update parent", { description: errorDetail(error) });
     } finally {
       inFlight.current = false;
       setSaving(false);
     }
   };
   return (
-    <ContextMenu.Sub open={open} onOpenChange={(nextOpen) => {
-      setOpen(nextOpen);
-      if (nextOpen) setQuery("");
-    }}>
+    <ContextMenu.Sub
+      open={open}
+      onOpenChange={(nextOpen) => {
+        setOpen(nextOpen);
+        if (nextOpen) setQuery("");
+      }}
+    >
       <ContextMenu.SubTrigger
         disabled={saving}
-        className="flex cursor-pointer items-center rounded-md px-2 py-1.5 text-sm outline-none data-[state=open]:bg-accent data-[highlighted]:bg-accent data-[disabled]:opacity-50"
+        className="flex cursor-pointer items-center rounded-md px-2 py-[0.3125rem] text-xs outline-none data-[state=open]:bg-accent data-[highlighted]:bg-accent data-[disabled]:opacity-50"
       >
         Parent
         <Icon name="ChevronRight" className="ml-auto size-4 opacity-60" />
@@ -109,17 +107,24 @@ export function ParentThreadMenu({ thread }: { thread: PluginSidebarThread }) {
                 event.stopPropagation();
                 if (event.key === "ArrowDown" || event.key === "ArrowUp") {
                   event.preventDefault();
-                  const items = contentRef.current?.querySelectorAll<HTMLElement>('[role="menuitemradio"]');
+                  const items = contentRef.current?.querySelectorAll<HTMLElement>(
+                    '[role="menuitemradio"]:not([data-disabled])',
+                  );
                   const item = event.key === "ArrowDown" ? items?.[0] : items?.[items.length - 1];
                   item?.focus();
                 }
               }}
-              className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+              className="min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground"
             />
           </div>
           <ContextMenu.Label className="px-2 py-1 text-xs text-muted-foreground">
             Assign parent thread
           </ContextMenu.Label>
+          {thread.isPinned ? (
+            <div className="px-2 py-1 text-xs text-muted-foreground">
+              Choosing a different parent will unpin this thread. Choosing None keeps it pinned.
+            </div>
+          ) : null}
           <ContextMenu.RadioGroup
             value={thread.parentThreadId ?? ""}
             onValueChange={(value) => void updateParent(value || null)}
@@ -131,16 +136,22 @@ export function ParentThreadMenu({ thread }: { thread: PluginSidebarThread }) {
                 value={candidate.id}
                 disabled={saving}
                 textValue={candidate.title}
-                className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-accent data-[disabled]:opacity-50"
+                className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-[0.3125rem] text-xs outline-none data-[highlighted]:bg-accent data-[disabled]:opacity-50"
               >
-                {candidate.isPinned ? <Icon name="Pin" className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" /> : null}
+                {candidate.isPinned ? (
+                  <Icon name="Pin" className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                ) : null}
                 <span className="flex-1 truncate">
                   {candidate.projectName === null ? null : (
-                    <><span className="font-semibold">{candidate.projectName}</span> · </>
+                    <>
+                      <span className="font-semibold">{candidate.projectName}</span> ·{" "}
+                    </>
                   )}
                   {candidate.threadTitle}
                 </span>
-                <ContextMenu.ItemIndicator><Icon name="Check" className="size-4" /></ContextMenu.ItemIndicator>
+                <ContextMenu.ItemIndicator>
+                  <Icon name="Check" className="size-4" />
+                </ContextMenu.ItemIndicator>
               </ContextMenu.RadioItem>
             ))}
           </ContextMenu.RadioGroup>

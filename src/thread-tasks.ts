@@ -1,9 +1,9 @@
-export interface ThreadTaskFailure {
+interface ThreadTaskFailure {
   threadId: string;
   error: string;
 }
 
-export interface ThreadTaskResult {
+interface ThreadTaskResult {
   succeededThreadIds: string[];
   failures: ThreadTaskFailure[];
 }
@@ -39,9 +39,7 @@ export async function runThreadTasks(
   );
 
   return {
-    succeededThreadIds: threadIds.filter(
-      (threadId) => results.get(threadId) === null,
-    ),
+    succeededThreadIds: threadIds.filter((threadId) => results.get(threadId) === null),
     failures: threadIds.flatMap((threadId) => {
       const result = results.get(threadId);
       return result ? [result] : [];

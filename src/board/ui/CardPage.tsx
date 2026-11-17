@@ -12,7 +12,7 @@ import {
   type NewThreadRequest,
   type PluginNavPanelProps,
 } from "@get-bb/plugin-sdk/app";
-import { toast } from "sonner";
+import { toast } from "../../lib/toast";
 import type { boardRpcContract, BoardCard } from "../contract";
 import { useBoard } from "./useBoard";
 
@@ -81,7 +81,8 @@ function CardComposer({ card }: { card: BoardCard }) {
     let live = true;
     rpc.call("cardThreadPrompt", { cardId: card.id }).then(
       (result) => live && setPrompt(result.prompt),
-      (error: unknown) => toast.error("Could not load the card", { description: error instanceof Error ? error.message : undefined }),
+      (error: unknown) =>
+        toast.error("Could not load the card", { description: error instanceof Error ? error.message : undefined }),
     );
     return () => {
       live = false;
@@ -93,7 +94,9 @@ function CardComposer({ card }: { card: BoardCard }) {
       const { threadId } = await rpc.call("startCardThread", { cardId: card.id, request });
       navigate.toThread(threadId);
     } catch (error) {
-      toast.error("Could not start the card's thread", { description: error instanceof Error ? error.message : undefined });
+      toast.error("Could not start the card's thread", {
+        description: error instanceof Error ? error.message : undefined,
+      });
       // Rethrown so the composer keeps the draft.
       throw error;
     }

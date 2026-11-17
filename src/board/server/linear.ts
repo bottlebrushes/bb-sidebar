@@ -10,7 +10,7 @@ const graphqlResponseSchema = z.object({
   errors: z.array(z.object({ message: z.string() })).optional(),
 });
 
-export class LinearNotConfiguredError extends Error {
+class LinearNotConfiguredError extends Error {
   constructor() {
     super("Linear API key is not set: bb plugin config bb-sidebar set linearApiKey <key>");
   }
@@ -63,9 +63,10 @@ type LinearState = z.infer<typeof stateSchema>;
 export function statesToColumns(states: readonly LinearState[]): StateSpec[] {
   return states
     .map((state) => ({ state, category: CATEGORY_BY_STATE_TYPE[state.type] ?? "backlog" }))
-    .sort((left, right) =>
-      CATEGORY_RANK[left.category] - CATEGORY_RANK[right.category]
-      || left.state.position - right.state.position)
+    .sort(
+      (left, right) =>
+        CATEGORY_RANK[left.category] - CATEGORY_RANK[right.category] || left.state.position - right.state.position,
+    )
     .map(({ state, category }) => ({
       linearStateId: state.id,
       name: state.name,
@@ -128,14 +129,14 @@ export function blockingEdges(issue: LinearIssue) {
   ];
 }
 
-export interface IssueScope {
+interface IssueScope {
   teamId: string;
   linearProjectId: string | null;
   assignee: "me" | "anyone";
 }
 
 /** Days a completed or canceled issue stays on the board. */
-export const FINISHED_ISSUE_DAYS = 14;
+const FINISHED_ISSUE_DAYS = 14;
 
 /**
  * Every issue in scope: open ones, plus ones finished in the last
@@ -205,13 +206,24 @@ export async function fetchTeamProjects(client: LinearClient, teamId: string) {
   const data = await client.request(
     `query($id: String!) { team(id: $id) { projects(first: 250) { nodes { id name state } } } }`,
     { id: teamId },
-    z.object({ team: z.object({ projects: z.object({ nodes: z.array(z.object({
-      id: z.string(), name: z.string(), state: z.string(),
-    })) }) }) }),
+    z.object({
+      team: z.object({
+        projects: z.object({
+          nodes: z.array(
+            z.object({
+              id: z.string(),
+              name: z.string(),
+              state: z.string(),
+            }),
+          ),
+        }),
+      }),
+    }),
   );
-  return data.team.projects.nodes.sort((a, b) =>
-    Number(["completed", "canceled"].includes(a.state)) - Number(["completed", "canceled"].includes(b.state))
-    || a.name.localeCompare(b.name),
+  return data.team.projects.nodes.sort(
+    (a, b) =>
+      Number(["completed", "canceled"].includes(a.state)) - Number(["completed", "canceled"].includes(b.state)) ||
+      a.name.localeCompare(b.name),
   );
 }
 
@@ -223,12 +235,14 @@ export async function fetchTeamsAndProjects(client: LinearClient) {
     z.object({
       teams: z.object({ nodes: z.array(z.object({ id: z.string(), key: z.string(), name: z.string() })) }),
       projects: z.object({
-        nodes: z.array(z.object({
-          id: z.string(),
-          name: z.string(),
-          state: z.string(),
-          teams: z.object({ nodes: z.array(z.object({ id: z.string() })) }),
-        })),
+        nodes: z.array(
+          z.object({
+            id: z.string(),
+            name: z.string(),
+            state: z.string(),
+            teams: z.object({ nodes: z.array(z.object({ id: z.string() })) }),
+          }),
+        ),
       }),
     }),
   );
@@ -280,12 +294,14 @@ export async function fetchChildIssues(client: LinearClient, issueId: string) {
     z.object({
       issue: z.object({
         children: z.object({
-          nodes: z.array(z.object({
-            id: z.string(),
-            identifier: z.string(),
-            title: z.string(),
-            state: z.object({ name: z.string(), type: z.string() }),
-          })),
+          nodes: z.array(
+            z.object({
+              id: z.string(),
+              identifier: z.string(),
+              title: z.string(),
+              state: z.object({ name: z.string(), type: z.string() }),
+            }),
+          ),
         }),
       }),
     }),

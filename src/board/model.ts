@@ -19,4 +19,3 @@ export const DEFAULT_LOCAL_COLUMNS: ReadonlyArray<{ name: string; category: Colu
 ];
 
 export const LINEAR_ASSIGNEE_SCOPES = ["me", "anyone"] as const;
-

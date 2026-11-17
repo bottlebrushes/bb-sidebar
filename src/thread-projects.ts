@@ -22,11 +22,7 @@ export function placeThreadsInProjects(
   let changed = false;
   const placed = threads.map((thread) => {
     const projectId = placements.get(thread.id);
-    if (
-      projectId === undefined ||
-      projectId === thread.projectId ||
-      !projectIds.has(projectId)
-    ) {
+    if (projectId === undefined || projectId === thread.projectId || !projectIds.has(projectId)) {
       return thread;
     }
     changed = true;

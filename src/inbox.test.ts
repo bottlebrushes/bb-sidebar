@@ -1,61 +1,23 @@
 import { describe, expect, it } from "vitest";
-import type { PluginSidebarThread } from "@get-bb/plugin-sdk";
+import { sidebarThread as thread } from "./test-fixtures";
+import { childThreadsByParent } from "./ChildThreadList";
 import {
-  childNeedsYouCount,
-  childThreadsByParent,
-  childrenOf,
-} from "./ChildThreadList";
-import {
-  ALL_PROJECTS,
-  filterByProject,
+  filterByProjects,
   hideChildrenOfVisibleParents,
   parentOf,
   partitionPinned,
   reconcileProjectScope,
   filterProjectsByName,
-  searchThreadsByTitle,
   sortByCreatedAtDescending,
   sortSettledThreads,
   threadDisplayTitle,
+  resolveThreadTitlesIn,
+  shelfRowIds,
+  threadStoredTitle,
+  threadTitleHasMentions,
   visibleInboxThreads,
 } from "./inbox";
 import { placeThreadsInProjects } from "./thread-projects";
-
-function thread(
-  overrides: Partial<PluginSidebarThread> = {},
-): PluginSidebarThread {
-  return {
-    id: "thr_1",
-    projectId: "proj_1",
-    title: "A thread",
-    titleFallback: null,
-    parentThreadId: null,
-    sectionId: null,
-    originKind: null,
-    originPluginId: null,
-    providerId: "codex",
-    hasPendingInteraction: false,
-    activity: {
-      workflows: 0,
-      backgroundAgents: 0,
-      backgroundCommands: 0,
-      planMode: 0,
-      goals: 0,
-    },
-    indicator: "none",
-    indicatorLabel: null,
-    isUnread: false,
-    isPinned: false,
-    isArchived: false,
-    environment: null,
-    host: null,
-    createdAt: 100,
-    updatedAt: 100,
-    lastReadAt: 100,
-    latestAttentionAt: 100,
-    ...overrides,
-  };
-}
 
 describe("sortByCreatedAtDescending", () => {
   it("puts the newest thread first", () => {
@@ -74,25 +36,16 @@ describe("sortByCreatedAtDescending", () => {
       thread({ id: "a", createdAt: 2, updatedAt: 1 }),
       thread({ id: "b", createdAt: 1, updatedAt: 999, indicator: "runtime" }),
     ];
-    expect(sortByCreatedAtDescending(before).map((t) => t.id)).toEqual([
-      "a",
-      "b",
-    ]);
+    expect(sortByCreatedAtDescending(before).map((t) => t.id)).toEqual(["a", "b"]);
   });
 
   it("breaks ties on id so the order is stable", () => {
-    const ordered = sortByCreatedAtDescending([
-      thread({ id: "b", createdAt: 5 }),
-      thread({ id: "a", createdAt: 5 }),
-    ]);
+    const ordered = sortByCreatedAtDescending([thread({ id: "b", createdAt: 5 }), thread({ id: "a", createdAt: 5 })]);
     expect(ordered.map((t) => t.id)).toEqual(["a", "b"]);
   });
 
   it("does not mutate its input", () => {
-    const input = [
-      thread({ id: "a", createdAt: 1 }),
-      thread({ id: "b", createdAt: 2 }),
-    ];
+    const input = [thread({ id: "a", createdAt: 1 }), thread({ id: "b", createdAt: 2 })];
     sortByCreatedAtDescending(input);
     expect(input.map((t) => t.id)).toEqual(["a", "b"]);
   });
@@ -105,16 +58,10 @@ describe("sortSettledThreads", () => {
       ["new-thread", 900],
     ]);
     const ordered = sortSettledThreads(
-      [
-        thread({ id: "old-thread", createdAt: 999 }),
-        thread({ id: "new-thread", createdAt: 1 }),
-      ],
+      [thread({ id: "old-thread", createdAt: 999 }), thread({ id: "new-thread", createdAt: 1 })],
       (candidate) => settledAt.get(candidate.id) ?? null,
     );
-    expect(ordered.map((candidate) => candidate.id)).toEqual([
-      "new-thread",
-      "old-thread",
-    ]);
+    expect(ordered.map((candidate) => candidate.id)).toEqual(["new-thread", "old-thread"]);
   });
 
   it("falls back to the latest bb activity time", () => {
@@ -125,28 +72,66 @@ describe("sortSettledThreads", () => {
       ],
       () => null,
     );
-    expect(ordered.map((candidate) => candidate.id)).toEqual([
-      "attention",
-      "updated",
-    ]);
+    expect(ordered.map((candidate) => candidate.id)).toEqual(["attention", "updated"]);
   });
 });
 
 describe("threadDisplayTitle", () => {
   it("prefers the title, then the fallback, then a placeholder", () => {
     expect(threadDisplayTitle(thread({ title: "Real" }))).toBe("Real");
-    expect(
-      threadDisplayTitle(thread({ title: null, titleFallback: "Fallback" })),
-    ).toBe("Fallback");
-    expect(
-      threadDisplayTitle(thread({ title: null, titleFallback: null })),
-    ).toBe("Untitled thread");
+    expect(threadDisplayTitle(thread({ title: null, titleFallback: "Fallback" }))).toBe("Fallback");
+    expect(threadDisplayTitle(thread({ title: null, titleFallback: null }))).toBe("Untitled thread");
   });
 
   it("treats a whitespace-only title as absent", () => {
-    expect(
-      threadDisplayTitle(thread({ title: "   ", titleFallback: "Fallback" })),
-    ).toBe("Fallback");
+    expect(threadDisplayTitle(thread({ title: "   ", titleFallback: "Fallback" }))).toBe("Fallback");
+  });
+
+  it("shows bb's resolved names for mention titles and keeps the stored text for editing", () => {
+    const mentioned = thread({ title: "Review @thread:thr_other", displayTitle: "Review Other thread" });
+    expect(threadTitleHasMentions(mentioned)).toBe(true);
+    expect(threadDisplayTitle(mentioned)).toBe("Review Other thread");
+    expect(threadStoredTitle(mentioned)).toBe("Review @thread:thr_other");
+    // A host that has not resolved the name yet still shows the stored title.
+    expect(threadDisplayTitle({ ...mentioned, displayTitle: "" })).toBe("Review @thread:thr_other");
+  });
+
+  it("follows whatever bb resolved, including section aliases and file paths", () => {
+    const folder = thread({ title: "Review @folder:sec_work", displayTitle: "Review Work" });
+    expect(threadTitleHasMentions(folder)).toBe(true);
+    expect(threadDisplayTitle(folder)).toBe("Review Work");
+    const file = thread({ title: "Fix @src/inbox.ts", displayTitle: "Fix inbox.ts" });
+    expect(threadDisplayTitle(file)).toBe("Fix inbox.ts");
+  });
+
+  it("leaves titles bb did not change exactly as stored", () => {
+    const plain = thread({ title: "Email me@example.com", displayTitle: "Email me@example.com" });
+    expect(threadTitleHasMentions(plain)).toBe(false);
+    expect(threadDisplayTitle(plain)).toBe("Email me@example.com");
+    // An unnamed thread keeps the sidebar's placeholder, not bb's short id.
+    const unnamed = thread({ title: null, titleFallback: null, displayTitle: "thr_1" });
+    expect(threadTitleHasMentions(unnamed)).toBe(false);
+    expect(threadDisplayTitle(unnamed)).toBe("Untitled thread");
+  });
+});
+
+describe("resolveThreadTitlesIn", () => {
+  const threads = [
+    thread({ id: "a", title: "Review @thread:thr_x", displayTitle: "Review Login fix" }),
+    thread({ id: "b", title: "Review @thread:thr_x again", displayTitle: "Review Login fix again" }),
+    thread({ id: "c", title: "Plain title", displayTitle: "Plain title" }),
+  ];
+
+  it("swaps stored mention titles for bb's names and leaves the rest of the text", () => {
+    expect(resolveThreadTitlesIn('shares a workspace with "Review @thread:thr_x", which is not settled', threads)).toBe(
+      'shares a workspace with "Review Login fix", which is not settled',
+    );
+    expect(resolveThreadTitlesIn("Cannot settle while Review @thread:thr_x again is working", threads)).toBe(
+      "Cannot settle while Review Login fix again is working",
+    );
+    expect(resolveThreadTitlesIn("Cannot settle while Plain title is working", threads)).toBe(
+      "Cannot settle while Plain title is working",
+    );
   });
 });
 
@@ -158,20 +143,12 @@ describe("filterProjectsByName", () => {
   ];
 
   it("keeps every project for a blank query", () => {
-    expect(filterProjectsByName(projects, "   ").map((p) => p.id)).toEqual([
-      "all",
-      "p1",
-      "p2",
-    ]);
+    expect(filterProjectsByName(projects, "   ").map((p) => p.id)).toEqual(["all", "p1", "p2"]);
   });
 
   it("matches case-insensitively anywhere in the name", () => {
-    expect(filterProjectsByName(projects, "BAN").map((p) => p.id)).toEqual([
-      "p2",
-    ]);
-    expect(filterProjectsByName(projects, "pro").map((p) => p.id)).toEqual([
-      "all",
-    ]);
+    expect(filterProjectsByName(projects, "BAN").map((p) => p.id)).toEqual(["p2"]);
+    expect(filterProjectsByName(projects, "pro").map((p) => p.id)).toEqual(["all"]);
   });
 
   it("returns nothing when no name matches", () => {
@@ -179,40 +156,15 @@ describe("filterProjectsByName", () => {
   });
 });
 
-describe("searchThreadsByTitle", () => {
-  it("matches case-insensitively on the visible title", () => {
-    const threads = [
-      thread({ id: "a", title: "Sidebar work" }),
-      thread({ id: "b", title: "Something else" }),
-      thread({ id: "c", title: null, titleFallback: "sidebar fallback" }),
-    ];
-    expect(searchThreadsByTitle(threads, "SIDEBAR").map((t) => t.id)).toEqual([
-      "a",
-      "c",
-    ]);
-  });
-
-  it("returns everything for a blank query", () => {
-    const threads = [thread({ id: "a" }), thread({ id: "b" })];
-    expect(searchThreadsByTitle(threads, "   ")).toHaveLength(2);
-  });
-});
-
 describe("filtering", () => {
   it("scopes to one project, or to all", () => {
-    const threads = [
-      thread({ id: "a", projectId: "p1" }),
-      thread({ id: "b", projectId: "p2" }),
-    ];
-    expect(filterByProject(threads, "p1").map((t) => t.id)).toEqual(["a"]);
-    expect(filterByProject(threads, null)).toHaveLength(2);
+    const threads = [thread({ id: "a", projectId: "p1" }), thread({ id: "b", projectId: "p2" })];
+    expect(filterByProjects(threads, ["p1"]).map((t) => t.id)).toEqual(["a"]);
+    expect(filterByProjects(threads, [])).toHaveLength(2);
   });
 
   it("scopes a placed thread under its chosen project, unless that project is gone", () => {
-    const threads = [
-      thread({ id: "moved", projectId: "personal" }),
-      thread({ id: "stale", projectId: "personal" }),
-    ];
+    const threads = [thread({ id: "moved", projectId: "personal" }), thread({ id: "stale", projectId: "personal" })];
     const placed = placeThreadsInProjects(
       threads,
       new Map([
@@ -221,15 +173,12 @@ describe("filtering", () => {
       ]),
       [{ id: "personal" }, { id: "p1" }],
     );
-    expect(filterByProject(placed, "p1").map((t) => t.id)).toEqual(["moved"]);
-    expect(filterByProject(placed, "personal").map((t) => t.id)).toEqual(["stale"]);
+    expect(filterByProjects(placed, ["p1"]).map((t) => t.id)).toEqual(["moved"]);
+    expect(filterByProjects(placed, ["personal"]).map((t) => t.id)).toEqual(["stale"]);
   });
 
   it("drops archived threads", () => {
-    const threads = [
-      thread({ id: "a" }),
-      thread({ id: "b", isArchived: true }),
-    ];
+    const threads = [thread({ id: "a" }), thread({ id: "b", isArchived: true })];
     expect(visibleInboxThreads(threads).map((t) => t.id)).toEqual(["a"]);
   });
 
@@ -253,26 +202,41 @@ describe("child threads", () => {
     expect(visible.map((t) => t.id)).toEqual(["parent"]);
   });
 
-  // An orphan must stay visible: hidden here AND absent from any header chip
-  // would make it unreachable everywhere.
+  // An orphan must stay visible: hidden here AND absent from every parent's
+  // row would make it unreachable everywhere.
   it("keeps a child whose parent is not on screen", () => {
-    const visible = hideChildrenOfVisibleParents([
-      thread({ id: "child", parentThreadId: "archived-parent" }),
-    ]);
+    const visible = hideChildrenOfVisibleParents([thread({ id: "child", parentThreadId: "archived-parent" })]);
     expect(visible.map((t) => t.id)).toEqual(["child"]);
   });
 
-  it("lists a thread's children oldest first", () => {
-    const children = childrenOf(
-      [
-        thread({ id: "parent" }),
-        thread({ id: "b", parentThreadId: "parent", createdAt: 20 }),
-        thread({ id: "a", parentThreadId: "parent", createdAt: 10 }),
-        thread({ id: "other", parentThreadId: "elsewhere" }),
-      ],
-      "parent",
-    );
-    expect(children.map((t) => t.id)).toEqual(["a", "b"]);
+  it("files every descendant under the row that carries its tree", () => {
+    const rows = shelfRowIds([
+      thread({ id: "root" }),
+      thread({ id: "child", parentThreadId: "root" }),
+      thread({ id: "grandchild", parentThreadId: "child" }),
+      thread({ id: "orphan", parentThreadId: "archived-parent" }),
+      thread({ id: "loop-a", parentThreadId: "loop-b" }),
+      thread({ id: "loop-b", parentThreadId: "loop-a" }),
+    ]);
+    expect(Object.fromEntries(rows)).toEqual({
+      root: "root",
+      child: "root",
+      grandchild: "root",
+      orphan: "orphan",
+      // A cycle has no row: the sidebar hides both threads.
+      "loop-a": null,
+      "loop-b": null,
+    });
+  });
+
+  it("lists a thread's children newest first by default", () => {
+    const children = childThreadsByParent([
+      thread({ id: "parent" }),
+      thread({ id: "a", parentThreadId: "parent", createdAt: 10 }),
+      thread({ id: "b", parentThreadId: "parent", createdAt: 20 }),
+      thread({ id: "other", parentThreadId: "elsewhere" }),
+    ]);
+    expect(children.get("parent")?.map((t) => t.id)).toEqual(["b", "a"]);
   });
 
   it("lists a thread's children by the configured sort", () => {
@@ -299,22 +263,28 @@ describe("child threads", () => {
     ];
 
     expect(
-      childrenOf(threads, "parent", {
+      childThreadsByParent(threads, {
         field: "created",
         direction: "descending",
-      }).map((t) => t.id),
+      })
+        .get("parent")
+        ?.map((t) => t.id),
     ).toEqual(["c", "b", "a"]);
     expect(
-      childrenOf(threads, "parent", {
+      childThreadsByParent(threads, {
         field: "activity",
         direction: "ascending",
-      }).map((t) => t.id),
+      })
+        .get("parent")
+        ?.map((t) => t.id),
     ).toEqual(["b", "a", "c"]);
     expect(
-      childrenOf(threads, "parent", {
+      childThreadsByParent(threads, {
         field: "activity",
         direction: "descending",
-      }).map((t) => t.id),
+      })
+        .get("parent")
+        ?.map((t) => t.id),
     ).toEqual(["c", "a", "b"]);
   });
 
@@ -336,13 +306,20 @@ describe("child threads", () => {
       thread({ id: "b", parentThreadId: "parent", createdAt: 10 }),
       thread({ id: "a", parentThreadId: "parent", createdAt: 10 }),
     ];
-    expect(childrenOf(threads, "parent").map((t) => t.id)).toEqual(["a", "b"]);
+    const oldestFirst = { field: "created", direction: "ascending" } as const;
     expect(
-      childrenOf([...threads].reverse(), "parent").map((t) => t.id),
+      childThreadsByParent(threads, oldestFirst)
+        .get("parent")
+        ?.map((t) => t.id),
+    ).toEqual(["a", "b"]);
+    expect(
+      childThreadsByParent([...threads].reverse(), oldestFirst)
+        .get("parent")
+        ?.map((t) => t.id),
     ).toEqual(["a", "b"]);
   });
 
-  it("excludes archived children from child helpers and attention counts", () => {
+  it("excludes archived children from the child map", () => {
     const threads = [
       thread({ id: "parent" }),
       thread({
@@ -358,13 +335,11 @@ describe("child threads", () => {
       }),
     ];
 
-    expect(childrenOf(threads, "parent").map((thread) => thread.id)).toEqual([
-      "visible",
-    ]);
     expect(
-      childThreadsByParent(threads).get("parent")?.map((thread) => thread.id),
+      childThreadsByParent(threads)
+        .get("parent")
+        ?.map((thread) => thread.id),
     ).toEqual(["visible"]);
-    expect(childNeedsYouCount(threads)).toBe(1);
   });
 });
 
@@ -396,13 +371,15 @@ describe("reconcileProjectScope", () => {
   const projects = [{ id: "project-a" }, { id: "project-b" }];
 
   it("keeps an available project and the all-projects scope", () => {
-    expect(reconcileProjectScope("project-a", projects)).toBe("project-a");
-    expect(reconcileProjectScope(ALL_PROJECTS, projects)).toBe(ALL_PROJECTS);
+    expect(reconcileProjectScope(["project-a"], projects)).toEqual(["project-a"]);
+    expect(reconcileProjectScope([], projects)).toEqual([]);
   });
 
   it("returns to all projects when the selected project disappears", () => {
-    expect(reconcileProjectScope("deleted-project", projects)).toBe(
-      ALL_PROJECTS,
-    );
+    expect(reconcileProjectScope(["deleted-project"], projects)).toEqual([]);
+  });
+
+  it("drops only removed projects and preserves the chosen order", () => {
+    expect(reconcileProjectScope(["project-b", "deleted", "project-a"], projects)).toEqual(["project-b", "project-a"]);
   });
 });

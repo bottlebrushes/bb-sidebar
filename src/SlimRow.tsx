@@ -1,73 +1,85 @@
-import { useState } from "react";
-import {
-  experimental_useSidebarThreadActions as useSidebarThreadActions,
-  type PluginSidebarThread,
-} from "@get-bb/plugin-sdk/app";
+import { memo, useId, useState } from "react";
+import { useSidebarThreadShortcut, type PluginSidebarThread } from "@get-bb/plugin-sdk/app";
 import { Icon } from "./components/Icon";
 import { Tooltip } from "./components/Tooltip";
-import { cn } from "./lib/utils";
+import { ChildThreadBadge, ChildThreadList, collapsedChildThreads } from "./ChildThreadList";
+import { CompactRow } from "./CompactRow";
 import { RowContextMenu } from "./RowContextMenu";
-import { StatusOrTime } from "./StatusSlot";
+import { StatusOrTime, useStatusLimit, useWorkingForDisplay } from "./StatusSlot";
 import { threadDisplayTitle } from "./inbox";
 import { snoozeWakeLabel } from "./lifecycle";
-import type { ConfiguredSnoozePreset } from "./lifecycle";
-import { InlineThreadTitle } from "./InlineThreadTitle";
-import { ProjectFavicon } from "./ProjectFavicon";
-import { ThreadDetailsTooltip } from "./ThreadDetailsTooltip";
+import { useProjectColor } from "./ProjectColors";
 import { OpenPortsIndicator } from "./OpenPorts";
-import { JumpHint, useJumpHint } from "./JumpHints";
+import { ShortcutHint } from "./bb-sdk";
+import { rowKeyshortcuts } from "./lib/keyshortcuts";
+import { useInboxActivity, useInboxEnvironment, useInboxActions } from "./InboxContext";
+import { useRowStatusRuns } from "./useLifecycle";
+import { projectIconUrl as iconUrl } from "./project-icons";
 
 /**
- * A parked thread: one line instead of a card. Density comes from the user
+ * A parked, snoozed, or settled thread: one line instead of a card, with its
+ * children behind the same chip as a compact card. Density comes from the user
  * actually parking work, never from the sidebar guessing what still matters.
  *
  * Same structure as the card — a full-bleed anchor under the restore button,
  * because a `<button>` inside an `<a>` is invalid interactive nesting.
  */
-export function SlimRow({
+export const SlimRow = memo(function SlimRow({
   thread,
-  projectName,
-  projectIconUrl,
   isActive,
   shelf,
   parkedAt,
-  onPark,
-  onSettle,
   wakeAt,
   now,
-  snoozePresets,
-  onNavigate,
-  onRestore,
-  onSnooze,
+  childrenExpanded,
 }: {
   thread: PluginSidebarThread;
-  projectName: string | null;
-  projectIconUrl: string | null;
   isActive: boolean;
   shelf: "parked" | "snoozed" | "settled";
   parkedAt?: number | null;
-  onPark?: () => void;
-  onSettle?: () => void;
   wakeAt: number | null;
   now: number;
-  snoozePresets: readonly ConfiguredSnoozePreset[];
-  onNavigate: () => void;
-  onRestore: () => void;
-  onSnooze: (snoozedUntil: number) => void;
+  childrenExpanded: boolean;
 }) {
-  const actions = useSidebarThreadActions();
-  const jumpHint = useJumpHint(thread.id);
+  const { projectNameById, projectIconRevision, snoozePresets, lifecycle, childrenByParentId } = useInboxEnvironment();
+  const { onNavigate, parkThread, settleThread, snoozeThread, toggleChildExpansion } = useInboxActions();
+  const { activeThreadId } = useInboxActivity();
+  const childThreads = childrenByParentId.get(thread.id) ?? [];
+  const childListId = useId();
+  const isWorking = useWorkingForDisplay();
+  // Shelved rows stay one line: children show only when expanded, or on the
+  // way to the open thread, never because one needs attention.
+  const showChildren =
+    childThreads.length > 0 &&
+    (childrenExpanded ||
+      collapsedChildThreads(childThreads, childrenByParentId, activeThreadId, false, isWorking).length > 0);
+  // Another plugin's running status keeps the thread where it is.
+  const canShelve = !useRowStatusRuns(thread.id);
+  const projectName = projectNameById.get(thread.projectId) ?? null;
+  const projectIconUrl = iconUrl(thread.projectId, projectIconRevision);
+  const onPark = () => parkThread(thread);
+  const onSettle = () => settleThread(thread);
+  const onSnooze = (until: number) => snoozeThread(thread, until);
+  const onRestore = () =>
+    shelf === "parked"
+      ? void lifecycle.resume(thread.id)
+      : shelf === "snoozed"
+        ? void lifecycle.unsnooze(thread.id)
+        : void lifecycle.unsettle(thread.id);
+  const projectColor = useProjectColor(thread.projectId);
+  const shortcut = useSidebarThreadShortcut(thread.id);
   const title = threadDisplayTitle(thread);
   const rowLabel = projectName ? `${projectName} · ${title}` : title;
   const [isRenaming, setIsRenaming] = useState(false);
+  const limit = useStatusLimit(thread);
 
   return (
     <RowContextMenu
       thread={thread}
-      onPark={shelf !== "parked" ? onPark : undefined}
+      onPark={canShelve && shelf !== "parked" ? onPark : undefined}
       onResume={shelf === "parked" ? onRestore : undefined}
-      onSettle={shelf !== "settled" ? onSettle : undefined}
-      canSnooze={shelf !== "snoozed"}
+      onSettle={canShelve && shelf !== "settled" ? onSettle : undefined}
+      canSnooze={canShelve && shelf !== "snoozed"}
       snoozePresets={snoozePresets}
       onSnooze={onSnooze}
       onWake={shelf === "snoozed" ? onRestore : undefined}
@@ -75,131 +87,96 @@ export function SlimRow({
       onRename={() => setIsRenaming(true)}
     >
       <li className="list-none">
-        <div
-          className={cn(
-            "group/slim relative flex h-8 items-center gap-2 rounded-md px-2.5 text-xs transition-colors duration-150 ease-out motion-reduce:transition-none",
-            isActive ? "bg-sidebar-accent" : "hover:bg-sidebar-accent/60",
-          )}
-        >
-          <ThreadDetailsTooltip thread={thread} disabled={isRenaming}>
-            <a
-              data-sidebar-thread-shortcut-target=""
-              data-sidebar-thread-id={thread.id}
-              href="#"
-              aria-label={rowLabel}
-              aria-current={isActive ? "page" : undefined}
-              onClick={(event) => {
-                event.preventDefault();
-                if (isRenaming || event.detail > 1) return;
-                actions.open(thread.id, { split: false });
-                onNavigate();
-              }}
-              onDoubleClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                setIsRenaming(true);
-              }}
-              className="absolute inset-0 cursor-pointer rounded-md"
-            />
-          </ThreadDetailsTooltip>
-          <span
-            className={cn(
-              "pointer-events-none relative flex min-w-0 flex-1 items-center gap-1",
-              isRenaming && "pointer-events-auto",
-              isActive ? "text-foreground" : "text-muted-foreground/70",
-              "group-hover/slim:text-foreground",
-            )}
-          >
-            {projectName && !isRenaming ? (
-              <>
-                <ProjectFavicon src={projectIconUrl} className="size-3" />
-                <span
-                  className={cn(
-                    "max-w-[40%] shrink truncate",
-                    isActive
-                      ? "text-muted-foreground/70"
-                      : "text-muted-foreground/50 group-hover/slim:text-muted-foreground/70",
-                  )}
-                >
-                  {projectName}
+        <CompactRow
+          thread={thread}
+          tone="muted"
+          projectName={projectName}
+          projectIconUrl={projectIconUrl}
+          projectColor={projectColor}
+          label={rowLabel}
+          isActive={isActive}
+          isRenaming={isRenaming}
+          onRenamingChange={setIsRenaming}
+          linkProps={{ "aria-keyshortcuts": rowKeyshortcuts(shortcut?.ariaKeyshortcuts, false) }}
+          onOpen={onNavigate}
+          trailing={
+            <>
+              <OpenPortsIndicator thread={thread} />
+              {childThreads.length > 0 ? (
+                // Positioned, so the chip sits above the row's full-bleed link.
+                <span className="pointer-events-none relative flex shrink-0 items-center">
+                  <ChildThreadBadge
+                    threads={childThreads}
+                    childrenByParent={childrenByParentId}
+                    expanded={childrenExpanded}
+                    controls={childListId}
+                    onToggle={() => toggleChildExpansion(thread.id)}
+                  />
                 </span>
-                <span
-                  aria-hidden="true"
-                  className={cn(
-                    "shrink-0 text-sm leading-none",
-                    isActive
-                      ? "text-muted-foreground/60"
-                      : "text-muted-foreground/45 group-hover/slim:text-muted-foreground/60",
-                  )}
-                >
-                  ·
-                </span>
-              </>
-            ) : null}
-            <InlineThreadTitle
-              thread={thread}
-              editing={isRenaming}
-              onEditingChange={setIsRenaming}
-              className={cn(
-                "min-w-0 flex-1 truncate",
-                isActive
-                  ? "text-foreground"
-                  : "text-foreground/80 group-hover/slim:text-foreground",
-              )}
-            />
-          </span>
-          <OpenPortsIndicator thread={thread} />
-          {/* Size to the label so the port icon stays beside it. Keep enough
+              ) : null}
+              {/* Size to the label so the port icon stays beside it. Keep enough
               room for the restore button, which replaces the label on hover.
               On touch devices, show both side by side. */}
-          {jumpHint ? (
-            <JumpHint label={jumpHint} />
-          ) : (
-            <span
-              className="pointer-events-none relative flex min-w-5 shrink-0 items-center justify-end tabular-nums text-2xs text-muted-foreground/60 [@media(hover:none)]:gap-2"
-            >
-              <span className="flex items-center transition-opacity duration-150 ease-out [@media(hover:hover)]:group-hover/slim:opacity-0 motion-reduce:transition-none">
-                {shelf === "parked" && parkedAt != null ? (
-                  `Waiting ${Math.max(0, Math.floor((now - parkedAt) / 86_400_000))}d`
-                ) : shelf === "snoozed" && wakeAt !== null ? (
-                  snoozeWakeLabel(wakeAt, now)
-                ) : (
-                  <StatusOrTime thread={thread} now={now} />
-                )}
-              </span>
-              <Tooltip
-                label={
-                  shelf === "parked" ? "Resume thread" : shelf === "snoozed" ? "Wake thread now" : "Un-settle thread"
-                }
-              >
-                <button
-                  type="button"
-                  aria-label={
-                    shelf === "parked"
-                      ? "Resume thread"
-                      : shelf === "snoozed"
-                      ? "Wake thread now"
-                      : "Un-settle thread"
-                  }
-                  onClick={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    onRestore();
-                  }}
-                  // Pulled right by its own padding, so the icon — not the hit
-                  // area — lands on the column.
-                  className="pointer-events-auto absolute -right-0.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity duration-150 ease-out hover:text-foreground focus-visible:opacity-100 group-hover/slim:opacity-100 [@media(hover:none)]:static [@media(hover:none)]:translate-y-0 [@media(hover:none)]:opacity-100 motion-reduce:transition-none"
-                >
-                  <Icon
-                    name={shelf === "snoozed" ? "Clock" : "ArrowTurnBackward"}
-                    className="size-3.5"
-                  />
-                </button>
-              </Tooltip>
-            </span>
-          )}
-        </div>
+              {shortcut ? (
+                <ShortcutHint shortcut={shortcut} />
+              ) : limit ? (
+                <StatusOrTime thread={thread} now={now} />
+              ) : (
+                <span className="pointer-events-none relative flex min-w-5 shrink-0 items-center justify-end tabular-nums text-2xs text-muted-foreground/60 [@media(hover:none)]:gap-2">
+                  <span className="flex items-center transition-opacity duration-150 ease-out [@media(hover:hover)]:group-hover/slim:opacity-0 motion-reduce:transition-none">
+                    {shelf === "parked" && parkedAt != null ? (
+                      `Waiting ${Math.max(0, Math.floor((now - parkedAt) / 86_400_000))}d`
+                    ) : shelf === "snoozed" && wakeAt !== null ? (
+                      snoozeWakeLabel(wakeAt, now)
+                    ) : (
+                      <StatusOrTime thread={thread} now={now} />
+                    )}
+                  </span>
+                  <Tooltip
+                    label={
+                      shelf === "parked"
+                        ? "Resume thread"
+                        : shelf === "snoozed"
+                          ? "Wake thread now"
+                          : "Un-settle thread"
+                    }
+                  >
+                    <button
+                      type="button"
+                      aria-label={
+                        shelf === "parked"
+                          ? "Resume thread"
+                          : shelf === "snoozed"
+                            ? "Wake thread now"
+                            : "Un-settle thread"
+                      }
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        onRestore();
+                      }}
+                      // Pulled right by its own padding, so the icon — not the hit
+                      // area — lands on the column.
+                      className="pointer-events-auto absolute -right-0.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity duration-150 ease-out hover:text-foreground focus-visible:opacity-100 group-hover/slim:opacity-100 [@media(hover:none)]:static [@media(hover:none)]:translate-y-0 [@media(hover:none)]:opacity-100 motion-reduce:transition-none"
+                    >
+                      <Icon name={shelf === "snoozed" ? "Clock" : "ArrowTurnBackward"} className="size-3.5" />
+                    </button>
+                  </Tooltip>
+                </span>
+              )}
+            </>
+          }
+        />
+        {showChildren ? (
+          <ChildThreadList
+            id={childListId}
+            threads={childThreads}
+            expanded={childrenExpanded}
+            showRunningChildrenWhenCollapsed={false}
+            parentProjectId={thread.projectId}
+          />
+        ) : null}
       </li>
     </RowContextMenu>
   );
-}
+});

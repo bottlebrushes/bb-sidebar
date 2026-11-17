@@ -1,0 +1,40 @@
+import { readdirSync, readFileSync } from "node:fs";
+
+// Physical line ceilings after formatting, tracked debt for SB-3/SB-5/SB-6.
+// Production/scripts get 500 lines, tests 1,000. A recorded ceiling is a cap; staying under it passes.
+const debtLimits = {
+  "src/ThreadCard.tsx": 574,
+  // The board arrived from a fork before these budgets; split before growing them.
+  "src/board/server/index.ts": 1454,
+  "src/board/server/store.ts": 1033,
+  "src/board/ui/BoardSettings.tsx": 552,
+  "src/board/ui/BoardView.tsx": 918,
+};
+const files = [
+  "app.tsx",
+  ...readdirSync("src", { recursive: true })
+    .filter((name) => /\.(ts|tsx)$/.test(name))
+    .map((name) => `src/${name}`),
+  ...readdirSync("scripts", { recursive: true })
+    .filter((name) => name.endsWith(".mjs"))
+    .map((name) => `scripts/${name}`),
+];
+let failures = 0;
+for (const file of Object.keys(debtLimits)) {
+  if (!files.includes(file)) {
+    console.error(`${file}: debt file no longer exists. Remove the debt entry.`);
+    failures++;
+  }
+}
+for (const file of files) {
+  const source = readFileSync(file, "utf8");
+  const lines = source.length === 0 ? 0 : source.split(/\r?\n/).length - Number(source.endsWith("\n"));
+  const defaultLimit = /\.test\.(ts|tsx)$/.test(file) ? 1000 : 500;
+  const limit = debtLimits[file] ?? defaultLimit;
+  if (lines > limit) {
+    console.error(`${file}: ${lines} lines exceeds the ${limit}-line budget. Split the file before adding more.`);
+    failures++;
+  }
+}
+if (failures > 0) process.exitCode = 1;
+else console.log("File-size budgets passed.");

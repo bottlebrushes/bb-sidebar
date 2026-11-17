@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { PluginSidebarThread } from "@get-bb/plugin-sdk/app";
 import type { BoardCard, BoardColumn, BoardSnapshot } from "./contract";
-import { assigneeMatches, buildLayout, cardMatchesSearch, cardPassesFilters, coveringAncestor, orderColumn } from "./layout";
+import {
+  assigneeMatches,
+  buildLayout,
+  cardMatchesSearch,
+  cardPassesFilters,
+  coveringAncestor,
+  orderColumn,
+} from "./layout";
 
 function column(projectId: string, name: string, category: BoardColumn["category"], position: number): BoardColumn {
   return { id: `${projectId}:${name}`, projectId, name, category, position, linearStateId: null, color: null };
@@ -118,10 +125,18 @@ describe("buildLayout", () => {
       now: 2_000,
     });
     expect(columns.map((entry) => `${entry.name}${entry.shared ? "" : "*"}`)).toEqual([
-      "Backlog", "Todo", "In Progress", "Done", "Triage*", "QA*",
+      "Backlog",
+      "Todo",
+      "In Progress",
+      "Done",
+      "Triage*",
+      "QA*",
     ]);
     expect(ids(columns.find((entry) => entry.name === "Todo")!.cards)).toEqual(["one", "three"]);
-    expect(columns.find((entry) => entry.name === "Todo")!.columnIdByProject).toEqual({ loc: "loc:Todo", lin: "lin:Todo" });
+    expect(columns.find((entry) => entry.name === "Todo")!.columnIdByProject).toEqual({
+      loc: "loc:Todo",
+      lin: "lin:Todo",
+    });
   });
 
   it("reads one project's columns in its own order, even across categories", () => {
@@ -162,7 +177,10 @@ describe("buildLayout", () => {
 
   it("shows threads without a card in progress, recently settled ones as done, and no child threads", () => {
     const { columns } = buildLayout({
-      snapshot: snapshot({ columns: localColumns("p"), cards: [card("stored", "p:Todo", 1, { threadId: "t_carded" })] }),
+      snapshot: snapshot({
+        columns: localColumns("p"),
+        cards: [card("stored", "p:Todo", 1, { threadId: "t_carded" })],
+      }),
       threads: [
         thread("t_open", "p"),
         thread("t_settled", "p"),
@@ -203,29 +221,30 @@ describe("buildLayout", () => {
   });
 
   it("nests sub-items under an on-screen parent, and reports open blockers both ways when they stand alone", () => {
-    const build = (includeCard?: (entry: BoardCard) => boolean) => buildLayout({
-      snapshot: snapshot({
-        columns: localColumns("p"),
-        cards: [
-          card("parent", "p:In Progress", 1),
-          card("api", "p:In Progress", 2, { parentCardId: "parent" }),
-          card("ui", "p:Todo", 1, { parentCardId: "parent" }),
-          card("shipped", "p:Done", 1, { parentCardId: "parent" }),
-          card("docs", "p:Todo", 2),
-        ],
-        relations: [
-          { blockerCardId: "api", blockedCardId: "ui" },
-          { blockerCardId: "shipped", blockedCardId: "docs" },
-          { blockerCardId: "api", blockedCardId: "shipped" },
-        ],
-      }),
-      threads: [],
-      projectId: "p",
-      projectNames: {},
-      isSettled: () => false,
-      now: 2_000,
-      includeCard,
-    }).columns.flatMap((entry) => entry.cards);
+    const build = (includeCard?: (entry: BoardCard) => boolean) =>
+      buildLayout({
+        snapshot: snapshot({
+          columns: localColumns("p"),
+          cards: [
+            card("parent", "p:In Progress", 1),
+            card("api", "p:In Progress", 2, { parentCardId: "parent" }),
+            card("ui", "p:Todo", 1, { parentCardId: "parent" }),
+            card("shipped", "p:Done", 1, { parentCardId: "parent" }),
+            card("docs", "p:Todo", 2),
+          ],
+          relations: [
+            { blockerCardId: "api", blockedCardId: "ui" },
+            { blockerCardId: "shipped", blockedCardId: "docs" },
+            { blockerCardId: "api", blockedCardId: "shipped" },
+          ],
+        }),
+        threads: [],
+        projectId: "p",
+        projectNames: {},
+        isSettled: () => false,
+        now: 2_000,
+        includeCard,
+      }).columns.flatMap((entry) => entry.cards);
     const withParent = build();
     expect(withParent.map((entry) => entry.card.id).sort()).toEqual(["docs", "parent"]);
     expect(withParent.find((entry) => entry.card.id === "parent")!.subItems).toMatchObject({ done: 1, total: 3 });
@@ -262,7 +281,11 @@ describe("buildLayout", () => {
     const copy = alone.columns.flatMap((entry) => entry.cards).find((entry) => entry.card.id === "copy")!;
     expect(copy.duplicateOf?.id).toBe("main");
     expect(alone.columns.map((entry) => entry.name)).not.toContain("Todo");
-    expect(alone.columnOptions.find((option) => option.name === "Todo")).toEqual({ name: "Todo", hidden: true, count: 1 });
+    expect(alone.columnOptions.find((option) => option.name === "Todo")).toEqual({
+      name: "Todo",
+      hidden: true,
+      count: 1,
+    });
   });
 });
 
@@ -275,7 +298,10 @@ describe("cards of archived threads", () => {
           card("live", "p:Todo", 1, { threadId: "t_live" }),
           card("archived", "p:Todo", 2, { threadId: "t_archived" }),
           card("gone", "p:Todo", 3, { threadId: "t_gone" }),
-          card("issue", "p:Todo", 4, { threadId: "t_archived2", linear: { issueId: "i1", identifier: "TRA-1", url: "u" } }),
+          card("issue", "p:Todo", 4, {
+            threadId: "t_archived2",
+            linear: { issueId: "i1", identifier: "TRA-1", url: "u" },
+          }),
         ],
       }),
       threads: [
@@ -293,11 +319,18 @@ describe("cards of archived threads", () => {
 });
 
 describe("assigneeMatches", () => {
-  const mine = card("mine", "p:Todo", 1, { linear: { issueId: "i1", identifier: "TRA-1", url: "u" }, assignee: { id: "me", name: "Me" } });
-  const theirs = card("theirs", "p:Todo", 1, { linear: { issueId: "i2", identifier: "TRA-2", url: "u" }, assignee: { id: "lucas", name: "Lucas" } });
+  const mine = card("mine", "p:Todo", 1, {
+    linear: { issueId: "i1", identifier: "TRA-1", url: "u" },
+    assignee: { id: "me", name: "Me" },
+  });
+  const theirs = card("theirs", "p:Todo", 1, {
+    linear: { issueId: "i2", identifier: "TRA-2", url: "u" },
+    assignee: { id: "lucas", name: "Lucas" },
+  });
   const nobody = card("nobody", "p:Todo", 1, { linear: { issueId: "i3", identifier: "TRA-3", url: "u" } });
   const local = card("local", "p:Todo", 1);
-  const pick = (filter: string) => [mine, theirs, nobody, local].filter((entry) => assigneeMatches(entry, filter, "me")).map((entry) => entry.id);
+  const pick = (filter: string) =>
+    [mine, theirs, nobody, local].filter((entry) => assigneeMatches(entry, filter, "me")).map((entry) => entry.id);
 
   it("treats cards without a Linear issue as the user's own", () => {
     expect(pick("me")).toEqual(["mine", "local"]);
@@ -407,8 +440,20 @@ describe("priority sort", () => {
       card("waits", "p:Todo", 5, { priority: 1 }),
     ];
     const ordered = orderColumn(cards, [{ blockerCardId: "low", blockedCardId: "waits" }], "priority");
-    expect(ordered.map((entry) => `${entry.card.id}${entry.depth}`)).toEqual(["urgent0", "high0", "low0", "waits1", "none0"]);
-    expect(orderColumn(cards, [], "board").map((entry) => entry.card.id)).toEqual(["none", "low", "urgent", "high", "waits"]);
+    expect(ordered.map((entry) => `${entry.card.id}${entry.depth}`)).toEqual([
+      "urgent0",
+      "high0",
+      "low0",
+      "waits1",
+      "none0",
+    ]);
+    expect(orderColumn(cards, [], "board").map((entry) => entry.card.id)).toEqual([
+      "none",
+      "low",
+      "urgent",
+      "high",
+      "waits",
+    ]);
   });
 
   it("lifts unread cards above read ones, each group by priority", () => {
@@ -421,8 +466,12 @@ describe("priority sort", () => {
     const unread = new Set(["unreadLow", "unreadHigh"]);
     const ordered = orderColumn(cards, [], "priority-unread", (entry) => unread.has(entry.id));
     expect(ordered.map((entry) => entry.card.id)).toEqual(["unreadHigh", "unreadLow", "readUrgent", "readNone"]);
-    expect(orderColumn(cards, [], "priority", (entry) => unread.has(entry.id)).map((entry) => entry.card.id))
-      .toEqual(["readUrgent", "unreadHigh", "unreadLow", "readNone"]);
+    expect(orderColumn(cards, [], "priority", (entry) => unread.has(entry.id)).map((entry) => entry.card.id)).toEqual([
+      "readUrgent",
+      "unreadHigh",
+      "unreadLow",
+      "readNone",
+    ]);
   });
 
   it("on the board, puts every card that is not running above running ones, unread or not", () => {
@@ -448,8 +497,12 @@ describe("priority sort", () => {
       now: 2_000,
       sort: "priority-unread",
     });
-    expect(ids(columns.find((column) => column.name === "In Progress")!.cards))
-      .toEqual(["noThread", "idleLow", "runningUrgent", "runningUnread"]);
+    expect(ids(columns.find((column) => column.name === "In Progress")!.cards)).toEqual([
+      "noThread",
+      "idleLow",
+      "runningUrgent",
+      "runningUnread",
+    ]);
   });
 
   it("treats a card handled by a running ancestor thread as running", () => {

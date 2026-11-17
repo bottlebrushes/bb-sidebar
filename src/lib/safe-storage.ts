@@ -1,27 +1,12 @@
+import { PLUGIN_STORAGE_KEYS } from "./storage-keys";
 import type { ThreadLifecycleRow } from "../lifecycle";
 
-export const MAX_CACHED_LIFECYCLE_ROWS = 500;
+const MAX_CACHED_LIFECYCLE_ROWS = 500;
 export const MAX_CHILD_EXPANSION = 100;
-
-// Keys managed by this plugin — ordered least-critical first for eviction.
-const PLUGIN_STORAGE_KEYS = [
-  "bb-sidebar:working-since:v1",
-  "bb-sidebar:inbox-order-cache:v1",
-  "bb-sidebar:lifecycle-cache:v1",
-  "bb-sidebar:child-expansion:v1",
-  "bb-sidebar:project-collapse:v1",
-  "bb-sidebar:shelf-expansion:v1",
-  "bb-sidebar:active-sort:v1",
-  "bb-sidebar:settings-cache:v1",
-] as const;
 
 function isQuotaExceededError(error: unknown): boolean {
   if (error instanceof DOMException) {
-    return (
-      error.name === "QuotaExceededError" ||
-      error.name === "NS_ERROR_DOM_QUOTA_REACHED" ||
-      error.code === 22
-    );
+    return error.name === "QuotaExceededError" || error.name === "NS_ERROR_DOM_QUOTA_REACHED" || error.code === 22;
   }
   if (error instanceof Error) {
     return error.name === "QuotaExceededError";
@@ -29,9 +14,15 @@ function isQuotaExceededError(error: unknown): boolean {
   return false;
 }
 
-export function safeSetItem(key: string, value: string): boolean {
+export function safeSetItem(key: string, value: string, storage: "local" | "session" = "local"): boolean {
+  let target: Storage;
   try {
-    window.localStorage.setItem(key, value);
+    target = storage === "session" ? window.sessionStorage : window.localStorage;
+  } catch {
+    return false;
+  }
+  try {
+    target.setItem(key, value);
     return true;
   } catch (error) {
     if (!isQuotaExceededError(error)) return false;
@@ -41,12 +32,12 @@ export function safeSetItem(key: string, value: string): boolean {
     for (const candidate of PLUGIN_STORAGE_KEYS) {
       if (candidate === key) continue;
       try {
-        window.localStorage.removeItem(candidate);
+        target.removeItem(candidate);
       } catch {
         continue;
       }
       try {
-        window.localStorage.setItem(key, value);
+        target.setItem(key, value);
         return true;
       } catch (retryError) {
         if (!isQuotaExceededError(retryError)) return false;
@@ -56,7 +47,7 @@ export function safeSetItem(key: string, value: string): boolean {
     // The value still does not fit. Clear its old cache entry to leave room
     // for bb core, without ever removing keys owned by core or other plugins.
     try {
-      window.localStorage.removeItem(key);
+      target.removeItem(key);
     } catch {
       // Storage can become unavailable while recovering from quota pressure.
     }
@@ -78,13 +69,9 @@ function lifecycleRecency(row: ThreadLifecycleRow): number {
   return max;
 }
 
-export function pruneLifecycleRows(
-  rows: readonly ThreadLifecycleRow[],
-): ThreadLifecycleRow[] {
+export function pruneLifecycleRows(rows: readonly ThreadLifecycleRow[]): ThreadLifecycleRow[] {
   if (rows.length <= MAX_CACHED_LIFECYCLE_ROWS) return [...rows];
-  return [...rows]
-    .sort((a, b) => lifecycleRecency(b) - lifecycleRecency(a))
-    .slice(0, MAX_CACHED_LIFECYCLE_ROWS);
+  return [...rows].sort((a, b) => lifecycleRecency(b) - lifecycleRecency(a)).slice(0, MAX_CACHED_LIFECYCLE_ROWS);
 }
 
 export function pruneChildExpansion(ids: readonly string[]): string[] {

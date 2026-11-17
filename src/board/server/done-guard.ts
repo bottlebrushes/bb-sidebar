@@ -16,14 +16,14 @@ export interface ChildCardState {
   threadId: string | null;
 }
 
-export interface DoneMoveCheck {
+interface DoneMoveCheck {
   /** How the refusal names the parent: Linear identifier or card id. */
   cardRef: string;
   target: { name: string; category: ColumnCategory };
   children: readonly ChildCardState[];
 }
 
-export interface DoneRefusal {
+interface DoneRefusal {
   message: string;
   /** Stable key of the open children and their columns, for notify-once. */
   openKey: string;
@@ -41,8 +41,10 @@ export function checkDoneMove(check: DoneMoveCheck): DoneRefusal | null {
     .sort((left, right) => left.ref.localeCompare(right.ref, undefined, { numeric: true }));
   if (!open.length) return null;
   const noun = open.length === 1 ? "child card is" : "child cards are";
-  const lines = open.map((child) =>
-    `- ${child.ref} "${child.title}" [${child.columnName}] ${child.threadId ? `@thread:${child.threadId}` : "no thread"}`);
+  const lines = open.map(
+    (child) =>
+      `- ${child.ref} "${child.title}" [${child.columnName}] ${child.threadId ? `@thread:${child.threadId}` : "no thread"}`,
+  );
   return {
     message: [
       `Cannot move ${check.cardRef} to ${check.target.name}: ${open.length} ${noun} not Done or Canceled. Finish or cancel them first:`,

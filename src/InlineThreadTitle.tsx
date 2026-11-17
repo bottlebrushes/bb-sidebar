@@ -1,10 +1,8 @@
-import { useEffect, useRef, useState } from "react";
-import {
-  experimental_useSidebarThreadActions as useSidebarThreadActions,
-  type PluginSidebarThread,
-} from "@get-bb/plugin-sdk/app";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useSdk, type PluginSidebarThread } from "@get-bb/plugin-sdk/app";
+import { errorDetail, toast } from "./lib/toast";
 import { cn } from "./lib/utils";
-import { threadDisplayTitle } from "./inbox";
+import { threadDisplayTitle, threadStoredTitle, threadTitleHasMentions } from "./inbox";
 import { ThreadTitle } from "./ThreadTitle";
 
 /** Inline title editing shared by full cards and parked rows. */
@@ -19,10 +17,25 @@ export function InlineThreadTitle({
   onEditingChange: (editing: boolean) => void;
   className?: string;
 }) {
-  const actions = useSidebarThreadActions();
-  const title = threadDisplayTitle(thread);
+  const sdk = useSdk();
+  // Edit the stored title so saving never flattens mention tokens into names.
+  const title = threadStoredTitle(thread);
   const [draft, setDraft] = useState(title);
   const finished = useRef(false);
+  const latest = useRef({ draft, title, sdk, onEditingChange });
+  latest.current = { draft, title, sdk, onEditingChange };
+
+  useLayoutEffect(() => {
+    if (!editing) return;
+    return () => {
+      if (finished.current) return;
+      finished.current = true;
+      const { draft: currentDraft, title: currentTitle, sdk: currentSdk, onEditingChange: notify } = latest.current;
+      notify(false);
+      const nextTitle = currentDraft.trim();
+      if (nextTitle && nextTitle !== currentTitle) saveTitle(currentSdk, thread.id, nextTitle);
+    };
+  }, [editing, thread.id]);
 
   useEffect(() => {
     if (!editing) return;
@@ -30,7 +43,16 @@ export function InlineThreadTitle({
     finished.current = false;
   }, [editing, title]);
 
-  if (!editing) return <ThreadTitle threadId={thread.id} title={title} className={className} />;
+  if (!editing) {
+    return (
+      <ThreadTitle
+        threadId={thread.id}
+        title={threadDisplayTitle(thread)}
+        mentions={threadTitleHasMentions(thread)}
+        className={className}
+      />
+    );
+  }
 
   const finish = (save: boolean) => {
     if (finished.current) return;
@@ -38,14 +60,14 @@ export function InlineThreadTitle({
     onEditingChange(false);
     const nextTitle = draft.trim();
     if (save && nextTitle.length > 0 && nextTitle !== title) {
-      void actions.rename(thread.id, nextTitle);
+      saveTitle(sdk, thread.id, nextTitle);
     }
   };
 
   return (
     <input
       autoFocus
-      aria-label={`Rename ${title}`}
+      aria-label={`Rename ${threadDisplayTitle(thread)}`}
       value={draft}
       onFocus={(event) => event.currentTarget.select()}
       onChange={(event) => setDraft(event.currentTarget.value)}
@@ -67,4 +89,11 @@ export function InlineThreadTitle({
       )}
     />
   );
+}
+
+function saveTitle(sdk: ReturnType<typeof useSdk>, threadId: string, title: string) {
+  void sdk.threads.update({ threadId, title }).catch((error) => {
+    // The SDK rolls back; preserve the former sidebar rename's error feedback.
+    toast.error("Failed to update thread", { description: errorDetail(error) });
+  });
 }
