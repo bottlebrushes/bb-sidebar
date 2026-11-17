@@ -31,6 +31,8 @@ export const boardCardLinearSchema = z.object({
   url: z.string(),
 }).strict();
 
+export const boardCardLinearProjectSchema = z.object({ id: z.string(), name: z.string() }).strict();
+
 export const boardAssigneeSchema = z.object({ id: z.string(), name: z.string() }).strict();
 
 export const boardCardSchema = z.object({
@@ -48,12 +50,15 @@ export const boardCardSchema = z.object({
   /** Linear priority: 0 none, 1 urgent, 2 high, 3 medium, 4 low. */
   priority: z.number().int().min(0).max(4),
   linear: boardCardLinearSchema.nullable(),
+  /** Linear project containing this issue; null when unassigned or for a card without an issue. */
+  linearProject: boardCardLinearProjectSchema.nullable(),
   /** Linear assignee; null when unassigned or for a card without an issue. */
   assignee: boardAssigneeSchema.nullable(),
   createdAt: z.number(),
   updatedAt: z.number(),
 }).strict();
 export type BoardCard = z.infer<typeof boardCardSchema>;
+
 
 /** `blockerCardId` blocks `blockedCardId` (Linear "blocks" relation). */
 export const boardRelationSchema = z.object({
@@ -204,6 +209,14 @@ export const boardRpcContract = defineRpcContract({
       teams: z.array(z.object({ id: z.string(), key: z.string(), name: z.string() }).strict()),
       projects: z.array(z.object({ id: z.string(), name: z.string(), teamIds: z.array(z.string()) }).strict()),
     }).strict(),
+  },
+  listLinearProjects: {
+    input: z.object({ cardId: id }).strict(),
+    output: z.array(z.object({ id: z.string(), name: z.string(), state: z.string() }).strict()),
+  },
+  setCardLinearProject: {
+    input: z.object({ cardId: id, linearProjectId: id.nullable() }).strict(),
+    output: boardCardSchema,
   },
   /** Link (or unlink with null) a bb project to a Linear team; columns follow the team's states. */
   setProjectLinear: {

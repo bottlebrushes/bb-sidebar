@@ -37,6 +37,7 @@ function issue(overrides: Partial<LinearIssue> & { id: string }): LinearIssue {
     updatedAt: new Date(2_000_000).toISOString(),
     state: { id: "s_todo" },
     parent: null,
+    project: null,
     assignee: null,
     relations: { nodes: [] },
     inverseRelations: { nodes: [] },
@@ -197,6 +198,17 @@ describe("Linear pull", () => {
     applyIssues(store, "p", [issue({ id: "1" }), issue({ id: "2" }), issue({ id: "3" }), issue({ id: "4" })], true);
     expect(store.duplicateOf(card("2").id)).toBeUndefined();
     expect(store.toCard(card("1")).assignee).toBeNull();
+  });
+
+  it("follows the issue's Linear project as it is set, changed, and cleared", () => {
+    const store = linkedStore();
+    const project = () => store.toCard(store.cardByIssue("1")!).linearProject;
+    applyIssues(store, "p", [issue({ id: "1", project: { id: "lp1", name: "Outreach" } })], true);
+    expect(project()).toEqual({ id: "lp1", name: "Outreach" });
+    applyIssues(store, "p", [issue({ id: "1", project: { id: "lp2", name: "Billing" }, updatedAt: new Date(2_100_000).toISOString() })], false);
+    expect(project()).toEqual({ id: "lp2", name: "Billing" });
+    applyIssues(store, "p", [issue({ id: "1", updatedAt: new Date(2_200_000).toISOString() })], false);
+    expect(project()).toBeNull();
   });
 
   it("drops issues that left scope on a full pull, but keeps ones a thread works on", () => {

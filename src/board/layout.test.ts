@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { PluginSidebarThread } from "@get-bb/plugin-sdk/app";
 import type { BoardCard, BoardColumn, BoardSnapshot } from "./contract";
-import { assigneeMatches, buildLayout, cardMatchesSearch, coveringAncestor, orderColumn } from "./layout";
+import { assigneeMatches, buildLayout, cardMatchesSearch, cardPassesFilters, coveringAncestor, orderColumn } from "./layout";
 
 function column(projectId: string, name: string, category: BoardColumn["category"], position: number): BoardColumn {
   return { id: `${projectId}:${name}`, projectId, name, category, position, linearStateId: null, color: null };
@@ -19,6 +19,7 @@ function card(id: string, columnId: string, position: number, extra: Partial<Boa
     parentCardId: null,
     priority: 0,
     linear: null,
+    linearProject: null,
     assignee: null,
     createdAt: 1,
     updatedAt: 1,
@@ -320,6 +321,38 @@ describe("cardMatchesSearch", () => {
     expect(cardMatchesSearch(issue, "campaigns sender")).toBe(false);
     expect(cardMatchesSearch(issue, "sender", "Fix sender limits")).toBe(true);
     expect(cardMatchesSearch(issue, "   ")).toBe(true);
+  });
+});
+
+describe("cardPassesFilters", () => {
+  const mine = card("mine", "p:Todo", 1, {
+    title: "Fix sender limits",
+    linear: { issueId: "i1", identifier: "TRA-1", url: "u" },
+    assignee: { id: "me", name: "Me" },
+    linearProject: { id: "lp1", name: "Outreach" },
+  });
+  const theirs = card("theirs", "p:Todo", 2, {
+    title: "Fix sender warmup",
+    linear: { issueId: "i2", identifier: "TRA-2", url: "u" },
+    assignee: { id: "lucas", name: "Lucas" },
+  });
+  const pick = (assignee: string, search: string, linearProject = "all") =>
+    [mine, theirs]
+      .filter((item) => cardPassesFilters(item, { assignee, linearProject, viewerId: "me", search, threadTitle: null }))
+      .map((item) => item.id);
+
+  it("searches only within the assignee filter", () => {
+    expect(pick("me", "sender")).toEqual(["mine"]);
+    expect(pick("all", "sender")).toEqual(["mine", "theirs"]);
+    expect(pick("user:lucas", "limits")).toEqual([]);
+    expect(pick("me", "")).toEqual(["mine"]);
+  });
+
+  it("combines the Linear project filter with assignee and search, and searches project names", () => {
+    expect(pick("all", "", "project:lp1")).toEqual(["mine"]);
+    expect(pick("all", "", "none")).toEqual(["theirs"]);
+    expect(pick("user:lucas", "", "project:lp1")).toEqual([]);
+    expect(pick("all", "outreach")).toEqual(["mine"]);
   });
 });
 

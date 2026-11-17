@@ -86,6 +86,9 @@ export const BOARD_MIGRATIONS = [
      notified_at   INTEGER,
      requested_at  INTEGER
    )`,
+  // The Linear project (epic) a card's issue belongs to.
+  `ALTER TABLE board_cards ADD COLUMN linear_project_id TEXT`,
+  `ALTER TABLE board_cards ADD COLUMN linear_project_name TEXT`,
 ];
 
 export type AssigneeScope = "me" | "anyone";
@@ -129,6 +132,8 @@ export interface CardRow {
   linear_issue_id: string | null;
   linear_identifier: string | null;
   linear_url: string | null;
+  linear_project_id: string | null;
+  linear_project_name: string | null;
   assignee_id: string | null;
   assignee_name: string | null;
   last_local_write_at: number;
@@ -154,6 +159,7 @@ export interface IssueCardFields {
   linearStateId: string;
   position: number;
   priority: number;
+  linearProject: { id: string; name: string } | null;
   assignee: { id: string; name: string } | null;
 }
 
@@ -455,6 +461,7 @@ export class BoardStore {
     parentCardId?: string | null;
     priority?: number;
     linear?: { issueId: string; identifier: string; url: string } | null;
+    linearProject?: { id: string; name: string } | null;
     assignee?: { id: string; name: string } | null;
     localWrite?: boolean;
   }): CardRow {
@@ -463,8 +470,8 @@ export class BoardStore {
     this.db.prepare(
       `INSERT INTO board_cards (id, project_id, column_id, title, description, position, thread_id,
          parent_card_id, priority, linear_issue_id, linear_identifier, linear_url,
-         assignee_id, assignee_name, last_local_write_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         linear_project_id, linear_project_name, assignee_id, assignee_name, last_local_write_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       id,
       input.projectId,
@@ -478,6 +485,8 @@ export class BoardStore {
       input.linear?.issueId ?? null,
       input.linear?.identifier ?? null,
       input.linear?.url ?? null,
+      input.linearProject?.id ?? null,
+      input.linearProject?.name ?? null,
       input.assignee?.id ?? null,
       input.assignee?.name ?? null,
       input.localWrite === false ? 0 : timestamp,
@@ -490,6 +499,7 @@ export class BoardStore {
   updateCard(cardId: string, values: Partial<Pick<CardRow,
     "column_id" | "position" | "title" | "description" | "priority" | "parent_card_id" | "thread_id"
     | "assignee_id" | "assignee_name"
+    | "linear_project_id" | "linear_project_name"
   >>, localWrite = true): CardRow {
     const keys = Object.keys(values) as Array<keyof typeof values>;
     if (keys.length) {
@@ -740,6 +750,8 @@ export class BoardStore {
         title: fields.title,
         description: fields.description,
         priority: fields.priority,
+        linear_project_id: fields.linearProject?.id ?? null,
+        linear_project_name: fields.linearProject?.name ?? null,
         assignee_id: fields.assignee?.id ?? null,
         assignee_name: fields.assignee?.name ?? null,
       }, false);
@@ -752,6 +764,7 @@ export class BoardStore {
       position: fields.position,
       priority: fields.priority,
       linear: { issueId: fields.linearIssueId, identifier: fields.identifier, url: fields.url },
+      linearProject: fields.linearProject,
       assignee: fields.assignee,
       localWrite: false,
     });
@@ -858,6 +871,9 @@ export class BoardStore {
       priority: row.priority,
       linear: row.linear_issue_id && row.linear_identifier && row.linear_url
         ? { issueId: row.linear_issue_id, identifier: row.linear_identifier, url: row.linear_url }
+        : null,
+      linearProject: row.linear_project_id && row.linear_project_name
+        ? { id: row.linear_project_id, name: row.linear_project_name }
         : null,
       assignee: row.assignee_id ? { id: row.assignee_id, name: row.assignee_name ?? "" } : null,
       createdAt: row.created_at,

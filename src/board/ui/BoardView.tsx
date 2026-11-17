@@ -1,4 +1,4 @@
-import { useMemo, useState, type ComponentProps } from "react";
+import { useEffect, useMemo, useState, type ComponentProps, type CSSProperties } from "react";
 import {
   experimental_useSidebarThreadActions as useSidebarThreadActions,
   useBbNavigate,
@@ -12,7 +12,7 @@ import type { SidebarProvider } from "../../ProviderGlyph";
 import { projectIconUrl } from "../../project-icons";
 import { relativeTimeLabel } from "../../relative-time";
 import type { BoardCard, boardRpcContract, BoardSnapshot } from "../contract";
-import { assigneeMatches, buildLayout, cardMatchesSearch, coveringAncestor, type LayoutCard, type LayoutColumn } from "../layout";
+import { buildLayout, cardPassesFilters, coveringAncestor, type LayoutCard, type LayoutColumn } from "../layout";
 import { threadDisplayTitle } from "../../inbox";
 import { canParkThread } from "../../lifecycle";
 import { Popover, PopoverContent, PopoverTrigger } from "../../components/Popover";
@@ -44,10 +44,25 @@ function ToolbarSelect({ className, children, ...props }: ComponentProps<"select
 }
 
 type Dialog =
-  | { kind: "block" | "parent" | "duplicate" | "link" | "rename" | "delete"; item: LayoutCard };
+  | { kind: "block" | "parent" | "duplicate" | "link" | "rename" | "linearProject" | "delete"; item: LayoutCard };
 
 function errorText(error: unknown): string | undefined {
   return error instanceof Error ? error.message : undefined;
+}
+
+const ERROR_LINE_STYLE: CSSProperties = { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
+
+/** A multi-line error at caption size: the first line wraps, each later line is cut to one row. */
+function ErrorLines({ lines }: { lines: string[] }) {
+  const [summary, ...items] = lines;
+  return (
+    <div style={{ fontSize: 12, lineHeight: 1.4, display: "grid", gap: 2, minWidth: 0 }}>
+      <div>{summary}</div>
+      {items.map((line, index) => (
+        <div key={index} style={ERROR_LINE_STYLE} title={line}>{line}</div>
+      ))}
+    </div>
+  );
 }
 
 export function BoardView({
@@ -113,17 +128,21 @@ export function BoardView({
           isSettled,
           // `now` only ages settled threads off the board; a refetch is fresh enough.
           now: Date.now(),
-          // A search looks past the assignee filter, so any card can be found.
           includeCard: (card) => {
-            if (!searching) return assigneeMatches(card, filters.assignee, viewerId);
-            const thread = card.threadId ? threadsById.get(card.threadId) : undefined;
-            return cardMatchesSearch(card, search, thread ? threadDisplayTitle(thread) : null);
+            const thread = searching && card.threadId ? threadsById.get(card.threadId) : undefined;
+            return cardPassesFilters(card, {
+              assignee: filters.assignee,
+              linearProject: filters.linearProject,
+              viewerId,
+              search,
+              threadTitle: thread ? threadDisplayTitle(thread) : null,
+            });
           },
           hiddenColumns: filters.hiddenColumns,
           sort: filters.sort,
         })
       : { columns: [], columnOptions: [] }),
-    [filters.assignee, filters.hiddenColumns, filters.sort, isSettled, projectId, projectNames, search, searching, snapshot, threads, threadsById, viewerId],
+    [filters.assignee, filters.hiddenColumns, filters.linearProject, filters.sort, isSettled, projectId, projectNames, search, searching, snapshot, threads, threadsById, viewerId],
   );
   const columns = layout.columns;
   const assignees = useMemo(() => {
@@ -133,6 +152,13 @@ export function BoardView({
     }
     return [...byId].filter(([id]) => id !== viewerId).sort((a, b) => a[1].localeCompare(b[1]));
   }, [projectId, snapshot, viewerId]);
+  const linearProjects = useMemo(() => {
+    const byId = new Map<string, string>();
+    for (const card of snapshot?.cards ?? []) {
+      if (card.linearProject && (projectId === null || card.projectId === projectId)) byId.set(card.linearProject.id, card.linearProject.name);
+    }
+    return [...byId].sort((a, b) => a[1].localeCompare(b[1]));
+  }, [projectId, snapshot]);
   const storedById = useMemo(() => new Map((snapshot?.cards ?? []).map((card) => [card.id, card])), [snapshot]);
   const coveringThreadId = (card: BoardCard) => coveringAncestor(card, storedById)?.threadId ?? null;
   const cardsById = useMemo(
@@ -171,11 +197,14 @@ export function BoardView({
     try {
       await work();
     } catch (caught) {
-      // A refused Done move lists each open sub-item on its own line; keep the lines and time to read them.
+      // A refused Done move lists each open sub-item on its own line. The toast renders in bb's portal, outside
+      // this plugin's scoped CSS, so style inline: small text, one truncated line per sub-item, and a close button.
       const text = errorText(caught);
-      const multiline = text?.includes("\n") ?? false;
+      const lines = text?.split("\n").filter((line) => line.trim() !== "") ?? [];
+      const multiline = lines.length > 1;
       toast.error(label, {
-        description: multiline ? <span className="whitespace-pre-line">{text}</span> : text,
+        description: multiline ? <ErrorLines lines={lines} /> : text,
+        closeButton: true,
         ...(multiline ? { duration: 15_000 } : {}),
       });
       void refresh();
@@ -322,8 +351,6 @@ export function BoardView({
         </label>
         <ToolbarSelect
           aria-label="Assignee"
-          disabled={searching}
-          title={searching ? "Search looks at every assignee" : undefined}
           value={filters.assignee}
           onChange={(event) => filters.setAssignee(event.target.value)}
           className="max-w-36"
@@ -333,6 +360,18 @@ export function BoardView({
           <option value="unassigned">Unassigned</option>
           {assignees.map(([id, name]) => <option key={id} value={`user:${id}`}>{name}</option>)}
         </ToolbarSelect>
+        {linearProjects.length > 0 || filters.linearProject !== "all" ? (
+          <ToolbarSelect
+            aria-label="Linear project"
+            value={filters.linearProject}
+            onChange={(event) => filters.setLinearProject(event.target.value)}
+            className="max-w-36"
+          >
+            <option value="all">All projects</option>
+            <option value="none">No project</option>
+            {linearProjects.map(([id, name]) => <option key={id} value={`project:${id}`}>{name}</option>)}
+          </ToolbarSelect>
+        ) : null}
         <ToolbarSelect
           aria-label="Sort cards"
           value={filters.sort}
@@ -699,6 +738,8 @@ function BoardDialog({ dialog, threads, projectNames, snapshot, cardOptions, ens
           onSubmit={(title) => run("Could not rename the card", () => rpc.call("updateCard", { cardId: item.card.id, title }))}
         />
       );
+    case "linearProject":
+      return <LinearProjectDialog card={item.card} run={run} onClose={onClose} />;
     case "delete":
       return (
         <ConfirmDialog
@@ -710,4 +751,39 @@ function BoardDialog({ dialog, threads, projectNames, snapshot, cardOptions, ens
         />
       );
   }
+}
+
+/** Puts a Linear card in one of its team's projects (Linear's epics), or takes it out. */
+function LinearProjectDialog({ card, run, onClose }: {
+  card: BoardCard;
+  run(label: string, work: () => Promise<unknown>): Promise<void>;
+  onClose(): void;
+}) {
+  const rpc = useRpc<typeof boardRpcContract>();
+  const [projects, setProjects] = useState<Array<{ id: string; name: string; state: string }> | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  useEffect(() => {
+    rpc.call("listLinearProjects", { cardId: card.id }).then(setProjects, (error: unknown) => setLoadError(errorText(error) ?? "Could not load Linear projects."));
+  }, [rpc, card.id]);
+  const options = [
+    ...(card.linearProject ? [{ id: "", label: "No project", detail: `Remove from ${card.linearProject.name}` }] : []),
+    ...(projects ?? []).map((project) => ({
+      id: project.id,
+      label: project.name,
+      detail: project.id === card.linearProject?.id ? "Current" : project.state,
+    })),
+  ];
+  return (
+    <PickerDialog
+      title="Linear project…"
+      description={`Put "${card.title}" in a Linear project.`}
+      options={options}
+      empty={loadError ?? (projects === null ? "Loading Linear projects…" : "This team has no Linear projects.")}
+      onClose={onClose}
+      onPick={(id) => {
+        void run("Could not set the Linear project", () =>
+          rpc.call("setCardLinearProject", { cardId: card.id, linearProjectId: id || null })).catch(() => {});
+      }}
+    />
+  );
 }

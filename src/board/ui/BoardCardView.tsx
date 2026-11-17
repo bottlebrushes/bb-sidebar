@@ -26,6 +26,7 @@ export type CardAction =
   | { kind: "link" }
   | { kind: "unlink" }
   | { kind: "rename" }
+  | { kind: "linearProject" }
   | { kind: "linear" }
   | { kind: "delete" };
 
@@ -153,6 +154,14 @@ export function BoardCardView({
             <span className="flex min-w-0 items-center gap-1 truncate">
               <ProjectFavicon src={projectIconSrc} className="size-3" />
               <span className="truncate">{projectName}</span>
+            </span>
+          ) : null}
+          {card.linearProject ? (
+            <span
+              className="min-w-0 truncate rounded border border-border/70 bg-muted/50 px-1 text-[10px] leading-3"
+              title={`Linear project: ${card.linearProject.name}`}
+            >
+              {card.linearProject.name}
             </span>
           ) : null}
           <span className="relative ml-auto flex shrink-0 items-center gap-1">
@@ -377,6 +386,7 @@ function CardMenu({ item, onAction, children }: {
             <Item icon="Link" onSelect={() => onAction({ kind: "link" })}>Link thread…</Item>
           ) : null}
           {!item.virtual ? <Item icon="Edit" onSelect={() => onAction({ kind: "rename" })}>Rename…</Item> : null}
+          {card.linear ? <Item icon="Target" onSelect={() => onAction({ kind: "linearProject" })}>Linear project…</Item> : null}
           {card.linear ? <Item icon="ExternalLink" onSelect={() => onAction({ kind: "linear" })}>Open in Linear</Item> : null}
           {!item.virtual && !card.linear ? (
             <>

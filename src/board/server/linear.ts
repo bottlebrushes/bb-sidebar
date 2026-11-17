@@ -85,6 +85,7 @@ const issueSchema = z.object({
   updatedAt: z.string(),
   state: z.object({ id: z.string() }),
   parent: z.object({ id: z.string() }).nullable(),
+  project: z.object({ id: z.string(), name: z.string() }).nullable(),
   assignee: z.object({ id: z.string(), name: z.string() }).nullable(),
   relations: z.object({
     nodes: z.array(z.object({ id: z.string(), type: z.string(), relatedIssue: z.object({ id: z.string() }) })),
@@ -96,7 +97,7 @@ const issueSchema = z.object({
 export type LinearIssue = z.infer<typeof issueSchema>;
 
 const ISSUE_FIELDS = `id identifier title description url priority sortOrder updatedAt
-  state { id } parent { id } assignee { id name }
+  state { id } parent { id } project { id name } assignee { id name }
   relations(first: 50) { nodes { id type relatedIssue { id } } }
   inverseRelations(first: 50) { nodes { id type issue { id } } }`;
 
@@ -198,6 +199,20 @@ export async function fetchTeam(client: LinearClient, teamId: string) {
     }),
   );
   return { ...data.team, columns: statesToColumns(data.team.states.nodes) };
+}
+
+export async function fetchTeamProjects(client: LinearClient, teamId: string) {
+  const data = await client.request(
+    `query($id: String!) { team(id: $id) { projects(first: 250) { nodes { id name state } } } }`,
+    { id: teamId },
+    z.object({ team: z.object({ projects: z.object({ nodes: z.array(z.object({
+      id: z.string(), name: z.string(), state: z.string(),
+    })) }) }) }),
+  );
+  return data.team.projects.nodes.sort((a, b) =>
+    Number(["completed", "canceled"].includes(a.state)) - Number(["completed", "canceled"].includes(b.state))
+    || a.name.localeCompare(b.name),
+  );
 }
 
 export async function fetchTeamsAndProjects(client: LinearClient) {

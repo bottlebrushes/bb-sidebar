@@ -80,6 +80,7 @@ export function applyIssues(
         linearStateId: issue.state.id,
         position: issue.sortOrder,
         priority: issue.priority,
+        linearProject: issue.project,
         assignee: issue.assignee,
       }, Date.parse(issue.updatedAt));
       if (card) {

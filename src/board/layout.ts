@@ -115,19 +115,40 @@ export function assigneeMatches(card: BoardCard, filter: AssigneeFilter, viewerI
   return card.assignee?.id === filter.slice("user:".length);
 }
 
+/** "all", "none" (cards outside any Linear project), or `project:<linear project id>`. */
+export type LinearProjectFilter = string;
+
 /**
  * Whether a card matches a board search: every whitespace-separated term,
- * case-insensitive, appears in its Linear id, title, description, or its
- * thread's title. A blank query matches everything.
+ * case-insensitive, appears in its Linear id, title, description, Linear
+ * project name, or its thread's title. A blank query matches everything.
  */
 export function cardMatchesSearch(card: BoardCard, query: string, threadTitle: string | null = null): boolean {
   const terms = query.toLowerCase().split(/\s+/u).filter(Boolean);
   if (terms.length === 0) return true;
-  const haystack = [card.linear?.identifier, card.title, card.description, threadTitle]
+  const haystack = [card.linear?.identifier, card.title, card.description, card.linearProject?.name, threadTitle]
     .filter(Boolean)
     .join("\n")
     .toLowerCase();
   return terms.every((term) => haystack.includes(term));
+}
+
+/** Whether a card is drawn: it passes the assignee and Linear project filters and matches the search. */
+export function cardPassesFilters(
+  card: BoardCard,
+  filter: {
+    assignee: AssigneeFilter;
+    linearProject: LinearProjectFilter;
+    viewerId: string | null;
+    search: string;
+    threadTitle: string | null;
+  },
+): boolean {
+  const projectMatches = filter.linearProject === "all"
+    || (filter.linearProject === "none" ? card.linearProject === null : card.linearProject?.id === filter.linearProject.slice("project:".length));
+  return projectMatches
+    && assigneeMatches(card, filter.assignee, filter.viewerId)
+    && cardMatchesSearch(card, filter.search, filter.threadTitle);
 }
 
 /** Days a settled thread stays on the board, like a finished Linear issue. */
@@ -174,6 +195,7 @@ export function virtualCards(
       parentCardId: null,
       priority: 0,
       linear: null,
+      linearProject: null,
       assignee: null,
       createdAt: thread.createdAt,
       updatedAt: thread.updatedAt,

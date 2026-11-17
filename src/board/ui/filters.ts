@@ -1,7 +1,8 @@
 import { useCallback, useState } from "react";
-import type { AssigneeFilter, CardSort } from "../layout";
+import type { AssigneeFilter, CardSort, LinearProjectFilter } from "../layout";
 
 const ASSIGNEE_KEY = "bb-sidebar:board-assignee:v1";
+const LINEAR_PROJECT_KEY = "bb-sidebar:board-linear-project:v1";
 const HIDDEN_COLUMNS_KEY = "bb-sidebar:board-hidden-columns:v1";
 const SORT_KEY = "bb-sidebar:board-sort:v1";
 /** Linear's "Blocked" state repeats what blocker relations already show. */
@@ -32,9 +33,14 @@ export const isSort = (value: unknown): value is CardSort =>
 const isStringList = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every((entry) => typeof entry === "string");
 
-/** The board's assignee and column filters, saved per browser. */
+/** The board's assignee, Linear project, and column filters, saved per browser. */
 export function useBoardFilters() {
   const [assignee, setAssigneeState] = useState<AssigneeFilter>(() => read(ASSIGNEE_KEY, "me", isString));
+  const [linearProject, setLinearProjectState] = useState<LinearProjectFilter>(() => read(LINEAR_PROJECT_KEY, "all", isString));
+  const setLinearProject = useCallback((next: LinearProjectFilter) => {
+    setLinearProjectState(next);
+    write(LINEAR_PROJECT_KEY, next);
+  }, []);
   const [hiddenColumns, setHiddenState] = useState<ReadonlySet<string>>(
     () => new Set(read(HIDDEN_COLUMNS_KEY, DEFAULT_HIDDEN_COLUMNS, isStringList)),
   );
@@ -61,5 +67,5 @@ export function useBoardFilters() {
     setHiddenState(new Set());
     write(HIDDEN_COLUMNS_KEY, []);
   }, []);
-  return { assignee, setAssignee, hiddenColumns, toggleColumn, showAllColumns, sort, setSort };
+  return { assignee, setAssignee, linearProject, setLinearProject, hiddenColumns, toggleColumn, showAllColumns, sort, setSort };
 }
