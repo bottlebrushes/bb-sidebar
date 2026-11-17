@@ -163,9 +163,16 @@ function ProjectBoardRow({ name, projectId, boardProject, columns, linear }: {
       </div>
       {editing ? (
         link
-          ? <ColumnOrderEditor projectId={projectId} columns={columns} onDone={() => setEditing(false)} />
+          ? <>
+              <ColumnOrderEditor projectId={projectId} columns={columns} onDone={() => setEditing(false)} />
+              <ShippedColumnsEditor
+                projectId={projectId}
+                columns={columns}
+                shippedStateIds={boardProject?.shippedStateIds ?? null}
+              />
+            </>
           : <ColumnEditor projectId={projectId} columns={columns} onDone={() => setEditing(false)} />
-      ) : link ? (
+        ) : link ? (
         <p className="mt-1 text-xs text-muted-foreground">
           {boardProject?.syncError
             ? <span className="text-destructive-text">Sync failed: {boardProject.syncError}</span>
@@ -310,6 +317,60 @@ function ColumnOrderEditor({ projectId, columns, onDone }: {
         <button type="button" disabled={saving} className={primaryClass}
           onClick={() => save(draft.map((column) => column.id), "Column order saved")}>
           Save
+        </button>
+      </div>
+    </div>
+  );
+}
+function ShippedColumnsEditor({ projectId, columns, shippedStateIds }: {
+  projectId: string;
+  columns: BoardColumn[];
+  shippedStateIds: string[] | null;
+}) {
+  const rpc = useRpc<typeof boardRpcContract>();
+  const selectable = columns.filter((column) => column.linearStateId !== null);
+  const [draft, setDraft] = useState<string[]>(() => shippedStateIds ?? selectable
+    .filter((column) => column.category === "completed")
+    .map((column) => column.linearStateId!));
+  const [saving, setSaving] = useState(false);
+  const save = (linearStateIds: string[] | null, message: string) => {
+    setSaving(true);
+    rpc.call("setShippedColumns", { projectId, linearStateIds }).then(() => {
+      toast.success(message);
+    }, (caught: unknown) => {
+      toast.error("Could not save shipped columns", { description: caught instanceof Error ? caught.message : undefined });
+    }).finally(() => setSaving(false));
+  };
+
+  return (
+    <div className="mt-3 border-t border-border pt-3">
+      <p className="text-xs font-medium text-foreground">Shipped columns</p>
+      <p className="mt-1 text-[11px] text-muted-foreground">
+        Entering a selected completed column archives the linked thread. Canceled and duplicate columns only notify.
+      </p>
+      <div className="mt-2 grid gap-1 sm:grid-cols-2">
+        {selectable.map((column) => (
+          <label key={column.id} className="flex items-center gap-2 text-xs text-foreground">
+            <input
+              type="checkbox"
+              checked={draft.includes(column.linearStateId!)}
+              disabled={saving}
+              onChange={(event) => setDraft((current) => event.target.checked
+                ? [...current, column.linearStateId!]
+                : current.filter((id) => id !== column.linearStateId))}
+            />
+            {column.name}
+          </label>
+        ))}
+      </div>
+      <div className="mt-2 flex items-center gap-2">
+        <button type="button" disabled={saving} className={buttonClass}
+          onClick={() => save(null, "Shipped columns use completed states")}>
+          Use completed states
+        </button>
+        <button type="button" disabled={saving} className={primaryClass}
+          onClick={() => save(draft, "Shipped columns saved")}>
+          Save shipped columns
         </button>
       </div>
     </div>

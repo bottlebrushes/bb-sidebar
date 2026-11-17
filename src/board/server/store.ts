@@ -78,6 +78,14 @@ export const BOARD_MIGRATIONS = [
      open_key     TEXT NOT NULL,
      notified_at  INTEGER NOT NULL
    )`,
+  // A project's shipped Linear state ids; NULL means every completed state.
+  `ALTER TABLE board_projects ADD COLUMN shipped_columns TEXT`,
+  `CREATE TABLE IF NOT EXISTS board_pending_archives (
+     card_id       TEXT PRIMARY KEY,
+     thread_id     TEXT NOT NULL,
+     notified_at   INTEGER,
+     requested_at  INTEGER
+   )`,
 ];
 
 export type AssigneeScope = "me" | "anyone";
@@ -95,6 +103,7 @@ export interface ProjectRow {
   last_synced_at: number | null;
   sync_error: string | null;
   column_order: string | null;
+  shipped_columns: string | null;
 }
 
 export interface ColumnRow {
@@ -214,6 +223,7 @@ export class BoardStore {
     relation: Statement<[string, string], { linear_relation_id: string | null }>;
     blockersOf: Statement<[string], { blocker_card_id: string }>;
     blockedBy: Statement<[string], { blocked_card_id: string }>;
+    pendingArchive: Statement<[string], { thread_id: string; notified_at: number | null; requested_at: number | null }>;
   };
 
   constructor(readonly db: Database.Database, private readonly now: () => number = Date.now) {
@@ -254,6 +264,9 @@ export class BoardStore {
       ),
       blockedBy: db.prepare<[string], { blocked_card_id: string }>(
         "SELECT blocked_card_id FROM board_relations WHERE blocker_card_id = ?",
+      ),
+      pendingArchive: db.prepare<[string], { thread_id: string; notified_at: number | null; requested_at: number | null }>(
+        "SELECT thread_id, notified_at, requested_at FROM board_pending_archives WHERE card_id = ?",
       ),
     };
   }
@@ -329,6 +342,66 @@ export class BoardStore {
     if (existing.length || this.isLinked(this.project(projectId))) return existing;
     this.insertColumns(projectId, DEFAULT_LOCAL_COLUMNS);
     return this.columns(projectId);
+  }
+  /** State ids selected for shipping, or all completed states when unset. */
+  shippedStateIds(projectId: string): string[] {
+    const row = this.project(projectId);
+    if (row.shipped_columns !== null) {
+      try {
+        const configured = JSON.parse(row.shipped_columns);
+        if (Array.isArray(configured) && configured.every((id): id is string => typeof id === "string")) return configured;
+      } catch {
+        // Treat malformed legacy data as unset and use the safe category default.
+      }
+    }
+    return this.columns(projectId)
+      .filter((column) => column.category === "completed" && column.linear_state_id !== null)
+      .map((column) => column.linear_state_id!);
+  }
+
+  isShipped(projectId: string, column: ColumnRow): boolean {
+    return column.category === "completed"
+      && column.linear_state_id !== null
+      && this.shippedStateIds(projectId).includes(column.linear_state_id);
+  }
+
+  setShippedStateIds(projectId: string, stateIds: readonly string[] | null) {
+    const project = this.project(projectId);
+    if (!this.isLinked(project)) throw new BoardError("Shipped columns are only available for Linear-linked projects");
+    if (stateIds !== null) {
+      const available = new Set(this.columns(projectId).map((column) => column.linear_state_id).filter((id): id is string => id !== null));
+      if (new Set(stateIds).size !== stateIds.length || !stateIds.every((id) => available.has(id))) {
+        throw new BoardError("Choose only Linear columns from this project");
+      }
+      this.db.prepare("UPDATE board_projects SET shipped_columns = ? WHERE project_id = ?")
+        .run(JSON.stringify(stateIds), projectId);
+    } else {
+      this.db.prepare("UPDATE board_projects SET shipped_columns = NULL WHERE project_id = ?").run(projectId);
+    }
+  }
+
+  pendingArchive(cardId: string) {
+    return this.statements.pendingArchive.get(cardId);
+  }
+
+  ensurePendingArchive(cardId: string, threadId: string) {
+    this.db.prepare(
+      `INSERT INTO board_pending_archives (card_id, thread_id, notified_at, requested_at)
+       VALUES (?, ?, NULL, NULL)
+       ON CONFLICT(card_id) DO UPDATE SET thread_id = excluded.thread_id`,
+    ).run(cardId, threadId);
+  }
+
+  markArchiveNotified(cardId: string) {
+    this.db.prepare("UPDATE board_pending_archives SET notified_at = ? WHERE card_id = ?").run(this.now(), cardId);
+  }
+
+  markArchiveRequested(cardId: string) {
+    this.db.prepare("UPDATE board_pending_archives SET requested_at = ? WHERE card_id = ?").run(this.now(), cardId);
+  }
+
+  clearPendingArchive(cardId: string) {
+    this.db.prepare("DELETE FROM board_pending_archives WHERE card_id = ?").run(cardId);
   }
 
   column(columnId: string): ColumnRow {
@@ -807,6 +880,7 @@ export class BoardStore {
         : null,
       lastSyncedAt: row.last_synced_at,
       syncError: row.sync_error,
+      shippedStateIds: row.shipped_columns === null ? null : this.shippedStateIds(row.project_id),
     };
   }
 

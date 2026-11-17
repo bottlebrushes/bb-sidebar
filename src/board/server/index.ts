@@ -50,7 +50,7 @@ const firstMessageEventSchema = z.object({
 
 export const BOARD_CLI_USAGE = `  board list [--all] [--column <name>]   Cards in this project (or every project).
   board show [cardRef]                   One card; cardRef defaults to this thread's card.
-  board create <title...> [--column <name>] [--parent <cardRef>] [--blocked-by <cardRef>]
+  board create <title...> [--project <projectId>] [--column <name>] [--parent <cardRef>] [--blocked-by <cardRef>]
   board move <cardRef> <column...>       Move a card to a column (name, case-insensitive). A Done
                                          column is refused while a child card is not Done/Canceled.
   board block <cardRef> <blockerRef>     Mark <cardRef> blocked by <blockerRef>.
@@ -58,7 +58,7 @@ export const BOARD_CLI_USAGE = `  board list [--all] [--column <name>]   Cards i
   board parent <cardRef> <parentRef|->   Make a card a sub-item of another, or clear it.
   board duplicate <cardRef> <mainRef|->  Mark a card a duplicate of the main card, or clear it.
   board link <cardRef> <threadId|->      Link a card to a thread, or unlink it.
-  board linear <projectId> <teamKey|unlink> [--project <linearProjectId>] [--me]
+  board shipped <projectId> <columns|default>   Set shipped Linear columns (comma-separated names).
   board sync                             Pull every linked project from Linear now.
 
 cardRef: a card id, a Linear identifier such as TRA-123, or "this" (the
@@ -111,6 +111,7 @@ export interface BoardHandlers {
     columns: Array<{ id?: string; name: string; category: ColumnCategory }>;
   }): Promise<{ columns: BoardColumn[] }>;
   setColumnOrder(input: { projectId: string; columnIds: string[] | null }): Promise<{ columns: BoardColumn[] }>;
+  setShippedColumns(input: { projectId: string; linearStateIds: string[] | null }): Promise<BoardProject>;
   syncNow(input: { projectId?: string }): Promise<{ ok: boolean }>;
 }
 
@@ -143,6 +144,90 @@ export function createBoardServer(bb: BbPluginApi, db: Database.Database): Board
   const branchByEnvironment = new Map<string, string | null>();
 
   const publish = () => bb.realtime.publish(BOARD_CHANNEL, {});
+  type BoardThread = Awaited<ReturnType<typeof bb.sdk.threads.get>>;
+  const isThreadWorking = (thread: BoardThread) =>
+    thread.status === "active"
+    || thread.status === "pending"
+    || thread.status === "starting"
+    || thread.status === "stopping"
+    || ("hasPendingInteraction" in thread && thread.hasPendingInteraction)
+    || !["idle", "error"].includes(thread.runtime.displayStatus);
+
+  async function sendBoardMessage(threadId: string, text: string) {
+    await bb.sdk.threads.send({
+      threadId,
+      input: [{ type: "text", text, mentions: [] }],
+      mode: "queue-if-active",
+    });
+  }
+  async function archiveShippedCard(card: CardRow, thread?: BoardThread) {
+    const threadId = card.thread_id;
+    if (!threadId) return;
+    const current = thread ?? await bb.sdk.threads.get({ threadId });
+    if (current.archivedAt !== null) {
+      store.clearPendingArchive(card.id);
+      return;
+    }
+    store.ensurePendingArchive(card.id, threadId);
+    const pending = store.pendingArchive(card.id);
+    if (pending?.notified_at === null) {
+      const column = store.column(card.column_id);
+      const identifier = card.linear_identifier ?? card.id;
+      try {
+        await sendBoardMessage(threadId, `[board] ${identifier} is in ${column.name}: shipped. This thread is archived now.`);
+        store.markArchiveNotified(card.id);
+      } catch (error) {
+        bb.log.warn(`telling ${threadId} about shipped ${identifier} failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    const latest = await bb.sdk.threads.get({ threadId }).catch(() => current);
+    if (isThreadWorking(latest)) return;
+    if (store.pendingArchive(card.id)?.requested_at !== null) return;
+    try {
+      await bb.sdk.threads.archive({ threadId });
+      store.markArchiveRequested(card.id);
+    } catch (error) {
+      bb.log.warn(`archiving shipped thread ${threadId} failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  async function notifyCardMove(
+    card: CardRow,
+    from: ColumnRow,
+    to: ColumnRow,
+    byThreadId: string | null = null,
+  ) {
+    if (from.id === to.id || !card.thread_id) return;
+    const threadId = card.thread_id;
+    let thread: BoardThread;
+    try {
+      thread = await bb.sdk.threads.get({ threadId });
+    } catch {
+      return;
+    }
+    if (thread.archivedAt !== null) return;
+    const identifier = card.linear_identifier ?? card.id;
+    if (byThreadId !== threadId) {
+      const url = card.linear_url ? `\n${card.linear_url}` : "";
+      try {
+        await sendBoardMessage(threadId, `[board] ${identifier} "${card.title}" moved from ${from.name} to ${to.name}.${url}`);
+      } catch (error) {
+        bb.log.warn(`telling ${threadId} about ${identifier} moving failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    if (store.isShipped(card.project_id, to)) {
+      await archiveShippedCard(card, thread);
+    } else {
+      store.clearPendingArchive(card.id);
+    }
+  }
+
+  async function archiveShippedCards(projectId: string) {
+    for (const card of store.projectCards(projectId)) {
+      const column = store.column(card.column_id);
+      if (store.isShipped(projectId, column) && card.thread_id) await archiveShippedCard(card);
+    }
+  }
 
   async function projectIds(): Promise<string[]> {
     return (await bb.sdk.projects.list({ includePersonal: true })).map((project) => project.id);
@@ -326,6 +411,7 @@ export function createBoardServer(bb: BbPluginApi, db: Database.Database): Board
     const moved = store.updateCard(card.id, { column_id: target.id, position });
     if (target.category === "completed") store.clearDoneRefusal(card.id);
     publish();
+    await notifyCardMove(moved, store.column(card.column_id), target, byThreadId);
     return store.toCard(moved);
   }
 
@@ -691,6 +777,7 @@ export function createBoardServer(bb: BbPluginApi, db: Database.Database): Board
     bb.events.on(event, ({ thread }) => {
       const card = store.cardByThread(thread.id);
       if (!card?.linear_identifier) return;
+      store.clearPendingArchive(card.id);
       store.updateCard(card.id, { thread_id: null }, false);
       publish();
     });
@@ -707,13 +794,33 @@ export function createBoardServer(bb: BbPluginApi, db: Database.Database): Board
       bb.log.warn(`board link for ${thread.id} failed: ${error instanceof Error ? error.message : String(error)}`);
     });
   });
+  // A deferred shipped archive runs as soon as the thread reports idle.
+  bb.events.on("thread.idle", ({ thread }) => {
+    void (async () => {
+      const card = store.cardByThread(thread.id);
+      if (!card) return;
+      const column = store.column(card.column_id);
+      if (store.isShipped(card.project_id, column)) await archiveShippedCard(card, thread);
+    })().catch((error: unknown) => {
+      bb.log.warn(`archiving shipped card for ${thread.id} failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  });
 
   async function syncProject(projectId: string, forceFull = false) {
     const project = store.project(projectId);
     if (!store.isLinked(project)) return;
     try {
-      const result = await syncLinkedProject(store, linear, project, { now: Date.now(), forceFull });
-      if (result.full) await reconcileAllThreads();
+      const transitions: Array<{ card: CardRow; from: ColumnRow; to: ColumnRow }> = [];
+      const result = await syncLinkedProject(store, linear, project, {
+        now: Date.now(),
+        forceFull,
+        onColumnChange: (change) => transitions.push(change),
+      });
+      for (const transition of transitions) await notifyCardMove(transition.card, transition.from, transition.to);
+      if (result.full) {
+        await reconcileAllThreads();
+        await archiveShippedCards(projectId);
+      }
       if (result.full || result.applied > 0 || result.removed > 0 || project.sync_error !== null) publish();
     } catch (error) {
       bb.log.warn(`board sync for ${projectId} failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -747,6 +854,11 @@ export function createBoardServer(bb: BbPluginApi, db: Database.Database): Board
       if (input.columnIds === null) await syncProject(input.projectId, true);
       publish();
       return { columns: store.columns(input.projectId).map((row) => store.toColumn(row)) };
+    },
+    async setShippedColumns(input) {
+      store.setShippedStateIds(input.projectId, input.linearStateIds);
+      publish();
+      return store.toProject(store.project(input.projectId));
     },
     async syncNow(input) {
       const ids = input.projectId ? [input.projectId] : store.linkedProjects().map((row) => row.project_id);
@@ -848,7 +960,7 @@ export function createBoardServer(bb: BbPluginApi, db: Database.Database): Board
         return ok(describeCard(await resolveCard(positional[0] ?? "this", ctx)));
       case "create": {
         if (!positional.length) throw new BoardError("Usage: board create <title...>");
-        const projectId = await currentProject();
+        const projectId = flag("--project") ?? await currentProject();
         const column = flag("--column");
         const parent = flag("--parent");
         const card = await handlers.createCard({
@@ -915,6 +1027,20 @@ export function createBoardServer(bb: BbPluginApi, db: Database.Database): Board
         });
         const cards = store.projectCards(projectId).length;
         return ok(`Linked ${projectId} to ${team.key}${project.linear?.linearProjectName ? ` / ${project.linear.linearProjectName}` : ""}; ${cards} cards.`);
+      }
+      case "shipped": {
+        const projectId = positional[0];
+        const selected = positional.slice(1).join(" ").trim();
+        if (!projectId || !selected) throw new BoardError("Usage: board shipped <projectId> <columns|default>");
+        const stateIds = selected.toLowerCase() === "default"
+          ? null
+          : selected.split(",").map((name) => {
+            const column = columnByName(projectId, name);
+            if (!column.linear_state_id) throw new BoardError(`Column "${name}" has no Linear state`);
+            return column.linear_state_id;
+          });
+        await handlers.setShippedColumns({ projectId, linearStateIds: stateIds });
+        return ok(stateIds === null ? `Shipped columns for ${projectId} use completed states.` : `Shipped columns for ${projectId}: ${selected}.`);
       }
       case "sync":
         await handlers.syncNow({});

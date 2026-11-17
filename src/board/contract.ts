@@ -84,6 +84,8 @@ export const boardProjectSchema = z.object({
   linear: boardProjectLinearSchema.nullable(),
   lastSyncedAt: z.number().nullable(),
   syncError: z.string().nullable(),
+  /** Explicit shipped Linear state ids; null uses every completed state. */
+  shippedStateIds: z.array(z.string()).nullable(),
 }).strict();
 export type BoardProject = z.infer<typeof boardProjectSchema>;
 
@@ -238,6 +240,11 @@ export const boardRpcContract = defineRpcContract({
   setColumnOrder: {
     input: z.object({ projectId: id, columnIds: z.array(id).min(1).max(50).nullable() }).strict(),
     output: z.object({ columns: z.array(boardColumnSchema) }).strict(),
+  },
+  /** Select the Linear workflow states that mean the work shipped; null uses completed states. */
+  setShippedColumns: {
+    input: z.object({ projectId: id, linearStateIds: z.array(id).max(50).nullable() }).strict(),
+    output: boardProjectSchema,
   },
   syncNow: {
     input: z.object({ projectId: id.optional() }).strict(),

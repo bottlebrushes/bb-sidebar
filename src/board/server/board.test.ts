@@ -145,6 +145,13 @@ describe("Linear pull", () => {
     }, statesToColumns(TRA_STATES));
     return store;
   }
+  it("defaults shipped states to completed columns and persists an explicit state-id set", () => {
+    const store = linkedStore();
+    expect(store.shippedStateIds("p")).toEqual(["s_staging", "s_done"]);
+    store.setShippedStateIds("p", ["s_done"]);
+    expect(store.shippedStateIds("p")).toEqual(["s_done"]);
+    expect(store.toProject(store.project("p")).shippedStateIds).toEqual(["s_done"]);
+  });
 
   it("files issues by state and keeps parents and blockers from either side of the relation", () => {
     const store = linkedStore();
@@ -159,6 +166,19 @@ describe("Linear pull", () => {
     expect(store.blockersOf(card("2").id)).toEqual([card("1").id]);
     expect(store.blockersOf(card("3").id)).toEqual([card("2").id]);
     expect(store.blockersOf(card("1").id)).toEqual([]);
+  });
+  it("reports only actual Linear column transitions, not first inserts or unchanged issues", () => {
+    const store = linkedStore();
+    const changes: Array<{ from: string; to: string }> = [];
+    applyIssues(store, "p", [issue({ id: "1" })], true, ({ from, to }) => changes.push({ from: from.name, to: to.name }));
+    expect(changes).toEqual([]);
+    applyIssues(store, "p", [
+      issue({ id: "1", state: { id: "s_progress" }, updatedAt: new Date(2_100_000).toISOString() }),
+    ], false, ({ from, to }) => changes.push({ from: from.name, to: to.name }));
+    applyIssues(store, "p", [
+      issue({ id: "1", state: { id: "s_progress" }, updatedAt: new Date(2_200_000).toISOString() }),
+    ], false, ({ from, to }) => changes.push({ from: from.name, to: to.name }));
+    expect(changes).toEqual([{ from: "Todo", to: "In Progress" }]);
   });
 
   it("keeps duplicates from either side of the relation and their assignees", () => {
@@ -335,6 +355,60 @@ describe("board RPC and agent tools", () => {
     const done = columns.find((column) => column.name === "Done")!;
     await expect(harness.behavior.callRpc("moveCard", { cardId: card.id, columnId: done.id })).rejects.toThrow("transition not allowed");
     expect((await board()).cards.find((candidate) => candidate.id === card.id)!.columnId).toBe(todo.id);
+  });
+  it("defers a shipped archive for a working thread until its idle event", async () => {
+    let threadStatus: "active" | "idle" = "active";
+    const send = vi.fn(async () => ({ ok: true, delivery: "queued" as const }));
+    const archive = vi.fn(async () => ({ ok: true }));
+    const { harness, board } = await load({
+      threads: {
+        get: async ({ threadId }: { threadId: string }) => makeThreadResponse({
+          id: threadId,
+          projectId: "p",
+          status: threadStatus,
+        }),
+        send,
+        archive,
+      },
+      linear: ({ query, variables }) => {
+        const input = variables.input;
+        const stateId = input && typeof input === "object" && "stateId" in input ? input.stateId : undefined;
+        if (query.includes("team(id:")) return { team: { id: "t", key: "TRA", name: "traxy", states: { nodes: TRA_STATES } } };
+        if (query.includes("issues(")) return { issues: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } };
+        if (query.includes("issueCreate")) return {
+          issueCreate: { success: true, issue: { id: "iss_ship", identifier: "TRA-ship", url: "https://linear.app/i/TRA-ship", sortOrder: 1 } },
+        };
+        if (query.includes("children(")) return { issue: { children: { nodes: [] } } };
+        if (query.includes("issueUpdate")) return { issueUpdate: { success: true, issue: { id: "iss_ship", identifier: "TRA-ship", url: "https://linear.app/i/TRA-ship", state: { id: stateId }, sortOrder: 1 } } };
+        return undefined;
+      },
+    });
+    await harness.behavior.callRpc("setProjectLinear", { projectId: "p", linear: { teamId: "t", linearProjectId: null, assignee: "anyone" } });
+    const snapshot = await board();
+    const todo = snapshot.columns.find((column) => column.name === "Todo")!;
+    const done = snapshot.columns.find((column) => column.name === "Done")!;
+    await harness.behavior.callRpc("setShippedColumns", { projectId: "p", linearStateIds: [done.linearStateId] });
+    const card = await harness.behavior.callRpc("createCard", {
+      projectId: "p",
+      title: "Ship later",
+      columnId: todo.id,
+      threadId: "thr_ship",
+    }) as BoardCard;
+    await harness.behavior.callRpc("moveCard", { cardId: card.id, columnId: done.id });
+    expect(archive).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledTimes(2);
+    threadStatus = "idle";
+    await harness.behavior.emitThreadEvent("thread.idle", {
+      thread: makeThreadResponse({ id: "thr_ship", projectId: "p", status: "idle" }),
+      lastAssistantText: null,
+    });
+    await vi.waitFor(() => expect(archive).toHaveBeenCalledWith({ threadId: "thr_ship" }));
+    expect(send).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      threadId: "thr_ship",
+      input: expect.arrayContaining([
+        expect.objectContaining({ text: expect.stringContaining("shipped. This thread is archived now.") }),
+      ]),
+    }));
   });
 
   it("files a duplicate of a duplicate under the main card", async () => {

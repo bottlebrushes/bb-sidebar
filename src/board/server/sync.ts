@@ -6,7 +6,7 @@
 // every FULL_SYNC_MS: it refreshes the team's workflow states, re-reads every
 // issue in scope, and drops cards whose issue is gone.
 import { blockingEdges, duplicateEdges, fetchIssues, fetchTeam, type LinearClient, type LinearIssue } from "./linear";
-import type { BoardStore, ProjectRow } from "./store";
+import type { BoardStore, CardRow, ColumnRow, ProjectRow } from "./store";
 
 export const FULL_SYNC_MS = 5 * 60_000;
 
@@ -20,7 +20,11 @@ export async function syncLinkedProject(
   store: BoardStore,
   client: LinearClient,
   project: ProjectRow,
-  options: { now: number; forceFull?: boolean },
+  options: {
+    now: number;
+    forceFull?: boolean;
+    onColumnChange?: (change: { card: CardRow; from: ColumnRow; to: ColumnRow }) => void;
+  },
 ): Promise<SyncResult> {
   const teamId = project.linear_team_id;
   if (!teamId) return { full: false, applied: 0, removed: 0 };
@@ -35,7 +39,7 @@ export async function syncLinkedProject(
       { teamId, linearProjectId: project.linear_project_id, assignee: project.assignee_scope },
       { updatedAfter: full ? null : project.sync_cursor, now: options.now },
     );
-    const removed = applyIssues(store, project.project_id, issues, full);
+    const removed = applyIssues(store, project.project_id, issues, full, options.onColumnChange);
     const newest = issues.reduce<string | null>(
       (latest, issue) => (latest === null || issue.updatedAt > latest ? issue.updatedAt : latest),
       project.sync_cursor,
@@ -53,11 +57,20 @@ export async function syncLinkedProject(
 }
 
 /** Upsert cards, then parents and relations (both need every card to exist first). */
-export function applyIssues(store: BoardStore, projectId: string, issues: readonly LinearIssue[], full: boolean): number {
+export function applyIssues(
+  store: BoardStore,
+  projectId: string,
+  issues: readonly LinearIssue[],
+  full: boolean,
+  onColumnChange?: (change: { card: CardRow; from: ColumnRow; to: ColumnRow }) => void,
+): number {
   let removed = 0;
+  const changes: Array<{ card: CardRow; from: ColumnRow; to: ColumnRow }> = [];
   store.db.transaction(() => {
     const cardOfIssue = new Map<string, string>();
     for (const issue of issues) {
+      const existing = store.cardByIssue(issue.id);
+      const from = existing ? store.column(existing.column_id) : undefined;
       const card = store.upsertIssue(projectId, {
         linearIssueId: issue.id,
         identifier: issue.identifier,
@@ -69,7 +82,10 @@ export function applyIssues(store: BoardStore, projectId: string, issues: readon
         priority: issue.priority,
         assignee: issue.assignee,
       }, Date.parse(issue.updatedAt));
-      if (card) cardOfIssue.set(issue.id, card.id);
+      if (card) {
+        cardOfIssue.set(issue.id, card.id);
+        if (from && from.id !== card.column_id) changes.push({ card, from, to: store.column(card.column_id) });
+      }
     }
     const cardIdFor = (issueId: string) => cardOfIssue.get(issueId) ?? store.cardByIssue(issueId)?.id;
     // Each relation is listed on both issues; collect the batch first so one
@@ -101,5 +117,6 @@ export function applyIssues(store: BoardStore, projectId: string, issues: readon
     }
     if (full) removed = store.pruneIssues(projectId, new Set(issues.map((issue) => issue.id)));
   })();
+  for (const change of changes) onColumnChange?.(change);
   return removed;
 }
