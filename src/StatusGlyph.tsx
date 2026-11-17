@@ -1,4 +1,5 @@
 import type { PluginSidebarThreadIndicator } from "@get-bb/plugin-sdk";
+import type { SidebarIndicator } from "./RuntimeOverlays";
 import type { AnimationEvent } from "react";
 import type { PluginSidebarThread } from "@get-bb/plugin-sdk/app";
 import { Icon } from "./components/Icon";
@@ -66,7 +67,7 @@ export function StatusGlyph({
   label,
   className,
 }: {
-  indicator: PluginSidebarThreadIndicator;
+  indicator: SidebarIndicator;
   label: string | null;
   className?: string;
 }) {
@@ -75,7 +76,16 @@ export function StatusGlyph({
 
   switch (indicator) {
     case "unread-error":
+    case "stalled":
       return <Icon name="CircleX" aria-label={aria} className={cn(shared, statusToneClass(indicator))} />;
+    case "host-waking":
+      // The working pulse on a power icon: something is coming up, not
+      // running. Yellow keeps it apart from the blue working glyphs.
+      return (
+        <span className="bb-sidebar-working-pulse inline-flex shrink-0" onAnimationStart={syncWorkingPulse}>
+          <Icon name="Power" aria-label={aria} className={cn(shared, statusToneClass(indicator))} />
+        </span>
+      );
     case "waiting-for-input":
       return <Icon name="CircleQuestion" aria-label={aria} className={cn(shared, statusToneClass(indicator))} />;
     case "runtime":

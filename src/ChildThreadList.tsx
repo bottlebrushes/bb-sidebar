@@ -18,6 +18,7 @@ import {
 import { RateLimitRecovery } from "./RateLimitRecovery";
 import { limitStatus } from "./rate-limit-labels";
 import { useWorkingSinceContext } from "./useWorkingSince";
+import { useThreadOverlay } from "./RuntimeOverlays";
 import { threadDisplayTitle } from "./inbox";
 import { canParkThread } from "./lifecycle";
 import { RowContextMenu } from "./RowContextMenu";
@@ -356,9 +357,10 @@ function ChildThreadRow({
   const workingSince = useWorkingSinceContext();
   const statusThread = useThreadWithDraft(thread);
   const limit = useStatusLimit(thread);
+  const overlay = useThreadOverlay(thread);
   const visibleStatus = limit
     ? limitStatus(limit)
-    : threadStatusLabel(statusThread, workingSince.get(thread.id), effectiveNow);
+    : (overlay?.label ?? threadStatusLabel(statusThread, workingSince.get(thread.id), effectiveNow));
   const [isRenaming, setIsRenaming] = useState(false);
   const { splitProps } = useSidebarThreadSplit(thread.id);
   const RowAction = isRenaming ? "div" : "a";

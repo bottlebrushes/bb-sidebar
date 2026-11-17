@@ -11,6 +11,7 @@ import { ProviderGlyph } from "./ProviderGlyph";
 import { StatusGlyph } from "./StatusGlyph";
 import { useStatusLimit, useThreadRowStatus, useThreadWithDraft } from "./StatusSlot";
 import { StillThreadStatusGlyph } from "./StillThreadStatusGlyph";
+import { useThreadOverlay, type SidebarIndicator } from "./RuntimeOverlays";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { projectIconUrl } from "./project-icons";
 import { OpenPortDetails, useLookUpOpenPorts } from "./OpenPorts";
@@ -227,11 +228,14 @@ export function ThreadDetailsTooltip({
 }
 
 /** The status of the card and of each subthread, worded once so its glyph and its text agree. */
-function useCardStatus(thread: PluginSidebarThread) {
+function useCardStatus(thread: PluginSidebarThread): { label: string; indicator: SidebarIndicator } {
   const shown = useThreadWithDraft(thread);
   const limit = useStatusLimit(thread);
-  if (thread.hasPendingInteraction) return { label: "Needs you", indicator: "waiting-for-input" } as const;
-  return { label: limit ? limitStatus(limit) : (shown.indicatorLabel ?? "Idle"), indicator: shown.indicator };
+  const overlay = useThreadOverlay(thread);
+  if (thread.hasPendingInteraction) return { label: "Needs you", indicator: "waiting-for-input" };
+  if (limit) return { label: limitStatus(limit), indicator: shown.indicator };
+  if (overlay) return overlay;
+  return { label: shown.indicatorLabel ?? "Idle", indicator: shown.indicator };
 }
 
 /** bb's link routing opens the subthread; `onOpen` only closes the card. */

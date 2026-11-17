@@ -292,6 +292,7 @@ describe("sidebar settings", () => {
     );
 
     expect((await screen.findAllByRole("heading", { level: 2 })).map((heading) => heading.textContent)).toEqual([
+      "Board",
       "Sidebar layout",
       "Project appearance",
       "Thread behavior",

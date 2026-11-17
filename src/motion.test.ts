@@ -45,6 +45,7 @@ const ALLOWED: Record<string, { count: number; reason: string }> = {
   "src/settings-ui.tsx": { count: 1, reason: "spinner while a setting saves" },
   "src/RateLimitRecovery.tsx": { count: 1, reason: "spinner while a retry is in flight" },
   "src/OpenPorts.tsx": { count: 1, reason: "spinner while a port stops" },
+  "src/board/ui/BoardView.tsx": { count: 1, reason: "spinner while a Linear sync is in flight" },
   "src/settle-button.css": { count: 1, reason: "star shimmer only while the settle button is hovered or focused" },
   "src/working-pulse.css": {
     count: 1,

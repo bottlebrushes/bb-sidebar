@@ -49,6 +49,10 @@ import { useScrollFade } from "./useScrollFade";
 import { useShelveActions } from "./useShelveActions";
 import { usePersistedPreference } from "./lib/use-persisted-preference";
 import { activeSortCodec, childExpansionCodec, shelfExpansionCodec } from "./lib/inbox-preference-codecs";
+import { usePlacedThreads } from "./useThreadProjects";
+import { RuntimeOverlayProvider } from "./RuntimeOverlays";
+import { useBoardMode } from "./board/sidebar-width";
+import { InboxBoard } from "./board/ui/InboxBoard";
 const SETTLED_INITIAL_LIMIT = 10;
 
 type ActiveShelfKind = "pinned" | "inbox";
@@ -88,7 +92,8 @@ function ThreadInboxContent({
 }) {
   const { status, projects } = snapshot;
   const sidebarSettings = useSidebarSettings();
-  const threads = useThreadsWithSideChats(snapshot.threads, sidebarSettings);
+  const threads = useThreadsWithSideChats(usePlacedThreads(snapshot.threads, projects), sidebarSettings);
+  const boardMode = useBoardMode(isCompactViewport);
   const workingSince = useWorkingSince(threads, status);
   const { providers } = useProviders();
   const lifecycle = useLifecycle(threads, lifecycleRows);
@@ -449,33 +454,40 @@ function ThreadInboxContent({
       childDisplay={childDisplay}
       portScope={portScope}
     >
-      <ThreadInboxView
-        shelves={{
-          pinned: { threads: pinned, visibleThreads: visiblePinned },
-          inbox: { threads: inbox, visibleThreads: visibleInbox },
-          working: { threads: working, visibleThreads: visibleWorking },
-          inactive: { threads: inactive, visibleThreads: visibleInactive },
-          snoozed: { threads: snoozed, visibleThreads: visibleSnoozed },
-          parked: { threads: parked, visibleThreads: visibleParked },
-          settled: { threads: settled, visibleThreads: visibleSettled },
-        }}
-        scope={scope}
-        reorderAnnouncement={reorderAnnouncement}
-        attachScrollFadeRef={attachScrollFadeRef}
-        status={status}
-        expandedChildParentIds={expandedChildParentIds}
-        dockShelvesEnabled={dockShelvesEnabled}
-        attachShelvesMotionRef={attachShelvesMotionRef}
-        attachDockMotionRef={attachDockMotionRef}
-        expandedShelves={expandedShelves}
-        renderActiveThread={renderActiveThread}
-        activeSortMode={activeSortMode}
-        inboxProjectView={inboxProjectView}
-        environmentGrouping={projectGroups}
-        reorderControls={reorderControls}
-        sortedVisibleInbox={sortedVisibleInbox}
-        settledLimit={settledLimit}
-      />
+      <RuntimeOverlayProvider>
+        <ThreadInboxView
+          shelves={{
+            pinned: { threads: pinned, visibleThreads: visiblePinned },
+            inbox: { threads: inbox, visibleThreads: visibleInbox },
+            working: { threads: working, visibleThreads: visibleWorking },
+            inactive: { threads: inactive, visibleThreads: visibleInactive },
+            snoozed: { threads: snoozed, visibleThreads: visibleSnoozed },
+            parked: { threads: parked, visibleThreads: visibleParked },
+            settled: { threads: settled, visibleThreads: visibleSettled },
+          }}
+          scope={scope}
+          reorderAnnouncement={reorderAnnouncement}
+          attachScrollFadeRef={attachScrollFadeRef}
+          status={status}
+          expandedChildParentIds={expandedChildParentIds}
+          dockShelvesEnabled={dockShelvesEnabled}
+          attachShelvesMotionRef={attachShelvesMotionRef}
+          attachDockMotionRef={attachDockMotionRef}
+          expandedShelves={expandedShelves}
+          renderActiveThread={renderActiveThread}
+          activeSortMode={activeSortMode}
+          inboxProjectView={inboxProjectView}
+          environmentGrouping={projectGroups}
+          reorderControls={reorderControls}
+          sortedVisibleInbox={sortedVisibleInbox}
+          settledLimit={settledLimit}
+          board={
+            boardMode ? (
+              <InboxBoard scope={scope} threads={threads} expandedChildParentIds={expandedChildParentIds} />
+            ) : undefined
+          }
+        />
+      </RuntimeOverlayProvider>
     </InboxProvider>
   );
 }

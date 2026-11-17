@@ -3,7 +3,6 @@ import {
   useSidebarThreadRowStatus,
   useSidebarThreadRowStatuses,
   type PluginSidebarThread,
-  type PluginSidebarThreadIndicator,
   type PluginSidebarThreadRowStatus,
 } from "@get-bb/plugin-sdk/app";
 import { StillThreadStatusGlyph } from "./StillThreadStatusGlyph";
@@ -17,6 +16,7 @@ import { useWorkingSinceContext } from "./useWorkingSince";
 import { statusWithDuration } from "./working-since";
 import { useThreadLimit } from "./RateLimits";
 import { RateLimitRecovery } from "./RateLimitRecovery";
+import { useThreadOverlay, type SidebarIndicator } from "./RuntimeOverlays";
 
 /**
  * The default trailing slot for cards and flat rows: fixed and right-aligned.
@@ -78,7 +78,17 @@ export function StatusOrTime({
   const thread = useThreadWithDraft(listedThread);
   const workingSince = useWorkingSinceContext();
   const rowStatus = useThreadRowStatus(listedThread);
+  // The machine wait or a stuck queue: states bb does not report itself.
+  const overlay = useThreadOverlay(listedThread);
   if (useStatusLimit(listedThread)) return <RateLimitRecovery thread={listedThread} />;
+  if (overlay) {
+    const status = shortStatus(overlay.indicator, null)!;
+    return (
+      <span aria-label={overlay.label} className={cn("max-w-full truncate text-2xs font-medium", status.className)}>
+        {status.label}
+      </span>
+    );
+  }
   if (rowStatus) {
     // bb's glyph for another plugin's status, in place of the label; the age stays.
     return (
@@ -201,7 +211,7 @@ interface ShortStatus {
   ariaLabel?: string;
 }
 
-function shortStatus(indicator: PluginSidebarThreadIndicator, indicatorLabel: string | null): ShortStatus | null {
+function shortStatus(indicator: SidebarIndicator, indicatorLabel: string | null): ShortStatus | null {
   const className = statusToneClass(indicator);
   switch (indicator) {
     case "unread-error":
@@ -233,6 +243,10 @@ function shortStatus(indicator: PluginSidebarThreadIndicator, indicatorLabel: st
       // Worded from `queuedWork` in threadShortStatus, which also covers a
       // queued send bb ranks below another indicator.
       return null;
+    case "host-waking":
+      return { label: "Resuming", className, showsDuration: false };
+    case "stalled":
+      return { label: "Stuck", className, showsDuration: false };
     case "none":
       return null;
     default:
@@ -296,9 +310,10 @@ function isMonitoringLabel(label: string | null): boolean {
 }
 
 /** Status palette shared by cards, child labels, and glyphs. */
-export function statusToneClass(indicator: PluginSidebarThreadIndicator): string {
+export function statusToneClass(indicator: SidebarIndicator): string {
   switch (indicator) {
     case "unread-error":
+    case "stalled":
       return "text-[color:var(--bb-sidebar-tone-error)]";
     case "waiting-for-input":
       return "text-[color:var(--bb-sidebar-tone-pending)]";
@@ -318,6 +333,8 @@ export function statusToneClass(indicator: PluginSidebarThreadIndicator): string
       return "text-[color:var(--bb-sidebar-tone-draft)]";
     case "queued-failed":
       return "text-[color:var(--bb-sidebar-tone-error)]";
+    case "host-waking":
+      return "text-[color:var(--bb-sidebar-tone-host)]";
     case "none":
       return "text-muted-foreground";
     default:

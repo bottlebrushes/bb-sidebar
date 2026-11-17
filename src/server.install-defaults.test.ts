@@ -1,5 +1,7 @@
+import { createHash } from "node:crypto";
 import { expect, it } from "vitest";
 import plugin from "./server";
+import { INSTALL_DEFAULTS_MIGRATIONS } from "./server-settings";
 import { DEFAULT_SIDEBAR_SETTINGS } from "./sidebar-settings-values";
 import { createFakePluginHost, disposers, legacySettings } from "./test-server";
 
@@ -110,9 +112,11 @@ it("keeps settling quiet threads for an existing install that never saved settin
 
 it("marks only quiet-thread settling for an install made after finished pull requests became opt-in", async () => {
   // Installed with every earlier migration, used, then upgraded to this one.
+  // Later migrations follow it in the list, so it is found by its statement.
   const host = await start(createFakePluginHost({ pluginId: "bb-sidebar" }));
   const db = host.bb.storage.database();
-  db.prepare("DELETE FROM _bb_migrations WHERE id = (SELECT MAX(id) FROM _bb_migrations)").run();
+  const quietThreads = createHash("sha256").update(INSTALL_DEFAULTS_MIGRATIONS.at(-1)!).digest("hex");
+  expect(db.prepare("DELETE FROM _bb_migrations WHERE statement_hash = ?").run(quietThreads).changes).toBe(1);
   db.prepare("INSERT INTO inbox_order (thread_id, sort_index) VALUES (?, ?)").run("thr", 0);
   const upgraded = await host.harness.lifecycle.reload(plugin);
   disposers.push(() => upgraded.harness.lifecycle.dispose());

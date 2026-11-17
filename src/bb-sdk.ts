@@ -40,6 +40,8 @@ export {
   // bb's own thread-status rule. bb 0.49.0, the minimum host (engines.bb),
   // ships it, so it has no fallback.
   experimental_resolveThreadStatus as resolveThreadStatus,
+  // bb's own new-thread composer, for the New subthread dialog.
+  experimental_NewThreadComposer as NewThreadComposer,
 } from "@get-bb/plugin-sdk/app";
 
 /** Props bb passes to a thread header action. */

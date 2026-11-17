@@ -20,6 +20,12 @@ import { createServerHandlers } from "./server-handlers";
 import { createServerRateLimits } from "./server-rate-limits";
 import { createServerSideChats } from "./server-side-chats";
 import { createServerCli } from "./server-cli";
+import { createRuntimeOverlayLookup } from "./server-runtime-overlays";
+import { createServerThreadProjects, THREAD_PROJECTS_MIGRATION } from "./server-thread-projects";
+import { createServerSubthreads } from "./server-subthreads";
+import { createServerPendingSettle, PENDING_SETTLES_MIGRATION } from "./server-pending-settle";
+import { BOARD_MIGRATIONS, createBoardServer } from "./board/server";
+import { boardRpcContract } from "./board/contract";
 
 export type { StoredLifecycleRow } from "./server-lifecycle";
 
@@ -115,6 +121,11 @@ const migrations = [
    VALUES (1, '', 1, 6, 1, 3, 1)`,
   LIFECYCLE_BACKFILLS_MIGRATION,
   ...INSTALL_DEFAULTS_MIGRATIONS,
+  // This fork's features. Always append: bb refuses a database whose recorded
+  // statement at an index differs from the one in this list.
+  PENDING_SETTLES_MIGRATION,
+  THREAD_PROJECTS_MIGRATION,
+  ...BOARD_MIGRATIONS,
 ];
 
 export default async function plugin(bb: BbPluginApi) {
@@ -179,8 +190,33 @@ export default async function plugin(bb: BbPluginApi) {
   });
   const rateLimits = createServerRateLimits(ctx, lifecycle);
   const sideChats = createServerSideChats(ctx, lifecycle);
-  ctx.bb.rpc.register(bbSidebarRpcContract, { ...handlers, ...rateLimits, ...sideChats });
-  ctx.bb.cli.register(createServerCli(lifecycle, handlers, rateLimits.getThreadLimits));
+  const threadProjects = createServerThreadProjects(ctx);
+  const pendingSettle = createServerPendingSettle(ctx, handlers);
+  const board = createBoardServer(ctx.bb, ctx.db);
+  ctx.bb.rpc.register(bbSidebarRpcContract, {
+    ...handlers,
+    ...pendingSettle.handlers,
+    async removeProject(input) {
+      const result = await handlers.removeProject(input);
+      threadProjects.forgetProject(input.projectId);
+      return result;
+    },
+    ...rateLimits,
+    ...sideChats,
+    ...threadProjects.handlers,
+    ...createServerSubthreads(ctx),
+    getRuntimeOverlays: createRuntimeOverlayLookup(ctx.bb),
+  });
+  ctx.bb.rpc.register(boardRpcContract, board.handlers);
+  ctx.bb.cli.register(
+    createServerCli(
+      lifecycle,
+      { ...handlers, ...pendingSettle.handlers },
+      rateLimits.getThreadLimits,
+      pendingSettle.settleOrDefer,
+      board,
+    ),
+  );
   // New or resumed child work reopens the ancestor path, keeping its existing
   // sidebar nesting reachable. Siblings retain their own settled state.
   ctx.bb.events.on("thread.created", async ({ thread }) => {
@@ -203,6 +239,7 @@ export default async function plugin(bb: BbPluginApi) {
   ctx.bb.events.on("thread.deleted", ({ thread }) => {
     clear(thread.id);
     threadPullRequests.forgetThread(thread.id);
+    threadProjects.forgetThread(thread.id);
     const removed = ctx.db.prepare(`DELETE FROM inbox_order WHERE thread_id = ?`).run(thread.id);
     if (removed.changes > 0) {
       ctx.bb.rpc.experimental_invalidate([INBOX_ORDER_TAG]);

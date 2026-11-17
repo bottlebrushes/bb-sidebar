@@ -1,5 +1,7 @@
 import { PluginCliError, cliCommand, defineCli } from "@get-bb/plugin-sdk";
-import type { PluginCliContext } from "@get-bb/plugin-sdk";
+import type { PluginCliContext, PluginCliRegistration } from "@get-bb/plugin-sdk";
+import type { BoardServer } from "./board/server";
+import { BOARD_CLI_USAGE } from "./board/server";
 import type { ServerHandlers } from "./server-context";
 import type { ThreadLimitState } from "./contract";
 import type { createServerLifecycle } from "./server-lifecycle";
@@ -79,7 +81,9 @@ export function createServerCli(
   lifecycle: ReturnType<typeof createServerLifecycle>,
   handlers: CliHandlers,
   threadLimits: ThreadLimits,
-) {
+  settleOrDefer: (threadId: string) => Promise<"settled" | "deferred">,
+  board: BoardServer,
+): PluginCliRegistration {
   const { loadPolicyThreads, readOne, threadSignals } = lifecycle;
 
   /**
@@ -110,7 +114,7 @@ export function createServerCli(
     return { placed, byId: new Map(placed.map((entry) => [entry.thread.id, entry] as const)) };
   };
 
-  return defineCli({
+  const cli = defineCli({
     name: "sidebar",
     summary: "Snooze, settle, park, pin, and re-parent threads in the BB Sidebar",
     commands: {
@@ -202,14 +206,15 @@ export function createServerCli(
         },
       }),
       settle: cliCommand({
-        summary: "Settle an idle thread and its children",
+        summary: "Settle an idle thread and its children; a working thread settles when its turn ends",
         options: threadOption,
         run: ({ options }, ctx) => {
           const threadId = targetThread(options.thread, ctx);
-          return act(async () => {
-            await handlers.settle({ threadId });
-            return `settled ${threadId}`;
-          });
+          return act(async () =>
+            (await settleOrDefer(threadId)) === "settled"
+              ? `settled ${threadId}`
+              : `${threadId} is still working: it settles when its current turn ends`,
+          );
         },
       }),
       park: cliCommand({
@@ -283,4 +288,27 @@ export function createServerCli(
       }),
     },
   });
+
+  // The board parses its own arguments, so it sits beside the declared
+  // commands rather than inside them: `bb sidebar board <subcommand> …`.
+  return {
+    ...cli,
+    commands: [
+      ...(cli.commands ?? []),
+      {
+        name: "board",
+        summary: "List and change board cards, their blockers and parents, and Linear links",
+        usage:
+          "bb sidebar board <list|show|project|create|move|block|unblock|parent|duplicate|link|shipped|sync> [args]",
+      },
+    ],
+    run(argv, ctx) {
+      if (argv[0] !== "board") return cli.run(argv, ctx);
+      const rest = argv.slice(1);
+      if (!rest.length || rest.includes("--help") || rest.includes("-h")) {
+        return { exitCode: 0, stdout: `Usage: bb sidebar board <command> [args]\n\n${BOARD_CLI_USAGE}\n` };
+      }
+      return board.runCli(rest, ctx);
+    },
+  };
 }

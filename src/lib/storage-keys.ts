@@ -30,7 +30,19 @@ export const STORAGE_KEYS = {
   activeGrouping: { key: "bb-sidebar:active-grouping:v1", evictionPriority: 65 },
   // Machine selected for port links on this device.
   portLinkHost: { key: "bb-sidebar:port-link-host:v1", evictionPriority: 75 },
+  // Sidebar width, and the list and board widths to return to (board mode).
+  sidebarWidth: { key: "bb-sidebar:width:v2", evictionPriority: 87 },
+  // Board filters on this device.
+  boardAssignee: { key: "bb-sidebar:board-assignee:v1", evictionPriority: 86 },
+  boardLinearProject: { key: "bb-sidebar:board-linear-project:v1", evictionPriority: 86.1 },
+  boardHiddenColumns: { key: "bb-sidebar:board-hidden-columns:v1", evictionPriority: 86.2 },
+  boardSort: { key: "bb-sidebar:board-sort:v1", evictionPriority: 86.3 },
 } as const;
+
+/** bb's composer draft for a "New subthread" under this parent; bb stores it, not this plugin. */
+export function subthreadDraftKey(parentThreadId: string): string {
+  return `bb-sidebar:subthread:${parentThreadId}`;
+}
 
 export const PLUGIN_STORAGE_KEYS = Object.values(STORAGE_KEYS)
   .sort((a, b) => a.evictionPriority - b.evictionPriority)

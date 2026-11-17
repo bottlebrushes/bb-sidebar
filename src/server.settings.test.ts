@@ -6,7 +6,8 @@ import { createFakePluginHost, disposers, loadPlugin } from "./test-server";
 describe("lifecycle RPC", () => {
   it("stores the grouped sidebar settings through RPC", async () => {
     const harness = await loadPlugin();
-    expect(harness.inspection.registrations.settingsDescriptors).toEqual({});
+    // Sidebar settings live in the plugin database; bb's settings only hold the board's Linear key.
+    expect(Object.keys(harness.inspection.registrations.settingsDescriptors)).toEqual(["linearApiKey"]);
     await expect(harness.behavior.callRpc("getSidebarSettings", {})).resolves.toEqual({
       ...DEFAULT_SIDEBAR_SETTINGS,
       snoozePresets: "1h, Wait refresh (5 hours)=5h, evening@18:00, tomorrow@09:00, next-week@09:00",

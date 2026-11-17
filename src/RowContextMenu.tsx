@@ -1,5 +1,5 @@
 import { useThreadActions, useSidebarThreads } from "./bb-sdk";
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import * as ContextMenu from "@radix-ui/react-context-menu";
 import { useBbNavigate, useRpc, type PluginSidebarThread } from "@get-bb/plugin-sdk/app";
 import { errorDetail, toast } from "./lib/toast";
@@ -8,7 +8,9 @@ import { ParentThreadMenu } from "./ParentThreadMenu";
 import { notifiesParent, ParentNotificationsMenu } from "./ParentNotificationsMenu";
 import { DeleteThreadDialog } from "./DeleteThreadDialog";
 import { SnoozePickerDialog } from "./SnoozePickerDialog";
-import { Icon, type IconName } from "./components/Icon";
+import { Icon } from "./components/Icon";
+import { Item, Separator } from "./components/MenuItem";
+import { ProjectPlacementSubmenu } from "./ProjectPlacementSubmenu";
 import { cn } from "./lib/utils";
 import { usePortalScopeProps } from "./lib/portal-scope";
 import { ProjectActions } from "./ProjectContextMenu";
@@ -19,6 +21,15 @@ import {
   type ConfiguredSnoozePreset,
 } from "./lifecycle";
 import { beginTitleGeneration, finishTitleGeneration, useTitleGenerating } from "./title-generation-state";
+import { openSubthreadComposer } from "./useSubthreadComposer";
+
+// Mute state is owned by the Chime (Notifications & Sounds) plugin. Muting a
+// thread silences it and every descendant; the item is hidden when Chime is
+// not installed.
+const CHIME_HTTP = "/api/v1/plugins/chime/http";
+const MUTE_CHANGED_EVENT = "chime:thread-mute-changed";
+
+type MuteState = { muted: boolean; inheritedFrom: string | null };
 
 type RowContextMenuProps = {
   thread: PluginSidebarThread;
@@ -38,14 +49,18 @@ type RowContextMenuProps = {
 /** Keep the plugin's menus, but build their actions and dialogs only on first open. */
 export function RowContextMenu({ children, ...props }: RowContextMenuProps) {
   const [activated, setActivated] = useState(false);
+  // Counts opens so the menu re-reads state another plugin owns each time.
+  const [openCount, setOpenCount] = useState(0);
   return (
     <ContextMenu.Root
       onOpenChange={(open) => {
-        if (open) setActivated(true);
+        if (!open) return;
+        setActivated(true);
+        setOpenCount((count) => count + 1);
       }}
     >
       <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
-      {activated ? <RowMenuContents {...props} /> : null}
+      {activated ? <RowMenuContents {...props} openCount={openCount} /> : null}
     </ContextMenu.Root>
   );
 }
@@ -62,8 +77,13 @@ function RowMenuContents({
   onUnsettle,
   onWake,
   onRename,
-}: Omit<RowContextMenuProps, "children">) {
-  const actions = useThreadActions(thread, {
+  openCount,
+}: Omit<RowContextMenuProps, "children"> & { openCount: number }) {
+  const { projects, threads } = useSidebarThreads();
+  // The sidebar may file a thread under another project; bb still owns the
+  // one it was created in, which its own actions (links, routes) use.
+  const hostThread = threads.find((candidate) => candidate.id === thread.id) ?? thread;
+  const actions = useThreadActions(hostThread, {
     keys: [
       "bb--core/split",
       "bb--core/copyLink",
@@ -83,12 +103,43 @@ function RowMenuContents({
     if (!entry && key === "split") return navigate.toThread(thread.id, { split: true });
     return entry?.action.run();
   };
-  const { projects, threads } = useSidebarThreads();
   const project = projects.find((project) => project.id === thread.projectId);
   const portalScope = usePortalScopeProps();
   const rpc = useRpc<typeof bbSidebarRpcContract>();
   const regenerating = useTitleGenerating(thread.id);
   const renameAfterClose = useRef(false);
+  const subthreadAfterClose = useRef(false);
+  const [mute, setMute] = useState<MuteState | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setMute(null);
+    void fetch(`${CHIME_HTTP}/thread-mute?threadId=${encodeURIComponent(thread.id)}`)
+      .then((response) => (response.ok ? (response.json() as Promise<MuteState>) : null))
+      .then(
+        (state) => {
+          if (!cancelled) setMute(state);
+        },
+        () => {
+          if (!cancelled) setMute(null);
+        },
+      );
+    return () => {
+      cancelled = true;
+    };
+  }, [openCount, thread.id]);
+  const toggleMute = async (muted: boolean) => {
+    try {
+      const response = await fetch(`${CHIME_HTTP}/mute`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ threadId: thread.id, muted }),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      window.dispatchEvent(new Event(MUTE_CHANGED_EVENT));
+    } catch (error) {
+      toast.error(muted ? "Could not mute thread" : "Could not unmute thread", { description: errorDetail(error) });
+    }
+  };
   // Outlives the portaled submenu, which unmounts when a choice closes the menu.
   const pendingNotificationSave = useRef<Promise<void> | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -152,6 +203,13 @@ function RowMenuContents({
                 onCloseAutoFocus?.(event);
                 // A dialog takes focus next; do not pull it back to the row.
                 if (confirmingDelete || pickingSnooze) event.preventDefault();
+                if (subthreadAfterClose.current) {
+                  subthreadAfterClose.current = false;
+                  // The composer takes focus next; do not pull it back to the row.
+                  event.preventDefault();
+                  openSubthreadComposer(thread.id);
+                  return;
+                }
                 if (!renameAfterClose.current) return;
                 renameAfterClose.current = false;
                 // Hand focus to the editor after the menu releases its focus scope.
@@ -161,6 +219,13 @@ function RowMenuContents({
               className="z-50 min-w-44 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-md"
             >
               <Item onSelect={() => void run("split")}>Open in split</Item>
+              <Item
+                onSelect={() => {
+                  subthreadAfterClose.current = true;
+                }}
+              >
+                New subthread
+              </Item>
               <ParentThreadMenu thread={thread} />
               {notifiesParent(thread) ? (
                 <ParentNotificationsMenu thread={thread} pendingSave={pendingNotificationSave} />
@@ -186,12 +251,26 @@ function RowMenuContents({
                   </ContextMenu.Portal>
                 </ContextMenu.Sub>
               ) : null}
+              <ProjectPlacementSubmenu thread={thread} homeProjectId={hostThread.projectId} />
               {hasPinLifecycleItems ? <Separator /> : null}
               {thread.isPinned || thread.parentThreadId == null ? (
                 <Item icon={thread.isPinned ? "PinOff" : "Pin"} onSelect={() => void togglePin()}>
                   {thread.isPinned ? "Unpin" : "Pin"}
                 </Item>
               ) : null}
+              {mute === null ? null : mute.muted ? (
+                <Item icon="Notification" onSelect={() => void toggleMute(false)}>
+                  Unmute notifications
+                </Item>
+              ) : mute.inheritedFrom !== null ? (
+                <Item icon="NotificationOff" disabled onSelect={() => {}}>
+                  Muted by parent thread
+                </Item>
+              ) : (
+                <Item icon="NotificationOff" onSelect={() => void toggleMute(true)}>
+                  Mute notifications
+                </Item>
+              )}
               {canSnooze && onSnooze && snoozePresets.length > 0 ? (
                 <SnoozeSubmenu presets={snoozePresets} onSnooze={onSnooze} onPick={() => setPickingSnooze(true)} />
               ) : null}
@@ -344,41 +423,4 @@ function SnoozeSubmenu({
       </ContextMenu.Portal>
     </ContextMenu.Sub>
   );
-}
-
-function Item({
-  children,
-  icon,
-  destructive = false,
-  disabled = false,
-  title,
-  onSelect,
-}: {
-  children: ReactNode;
-  icon?: IconName;
-  destructive?: boolean;
-  disabled?: boolean;
-  title?: string;
-  onSelect: () => void;
-}) {
-  return (
-    <ContextMenu.Item
-      disabled={disabled}
-      title={title}
-      onSelect={onSelect}
-      className={cn(
-        "flex cursor-pointer items-center gap-2 rounded-md px-2 py-[0.3125rem] text-xs outline-none",
-        "data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground",
-        "data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50",
-        destructive && "text-destructive-text",
-      )}
-    >
-      {icon ? <Icon name={icon} className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" /> : null}
-      {children}
-    </ContextMenu.Item>
-  );
-}
-
-function Separator() {
-  return <ContextMenu.Separator className="my-1 h-px bg-border" />;
 }

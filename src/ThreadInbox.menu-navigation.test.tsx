@@ -49,6 +49,7 @@ describe("row context menu", () => {
         .map((item) => item.textContent),
     ).toEqual([
       "Open in split",
+      "New subthread",
       "Parent",
       "Project",
       "Pin",

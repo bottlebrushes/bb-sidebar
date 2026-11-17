@@ -1,4 +1,4 @@
-import { defineRpcContract } from "@get-bb/plugin-sdk";
+import { defineRpcContract, type NewThreadRequest } from "@get-bb/plugin-sdk";
 import { z } from "zod";
 import { normalizeProjectIconPath } from "./project-icons";
 import {
@@ -11,6 +11,7 @@ import {
 import { configuredSnoozePresetError } from "./lifecycle";
 import { MAX_INACTIVE_AFTER_HOURS, MIN_INACTIVE_AFTER_HOURS } from "./inactive";
 import { MAX_AUTO_SETTLE_AFTER_DAYS, MIN_AUTO_SETTLE_AFTER_DAYS } from "./auto-settle";
+import { runtimeOverlaySnapshotSchema } from "./runtime-overlay-schema";
 export {
   SIDEBAR_SETTINGS_CHANNEL,
   PROJECT_ICONS_CHANNEL,
@@ -260,6 +261,35 @@ export const bbSidebarRpcContract = defineRpcContract({
     input: threadIdSchema.extend({ parentThreadId: z.string().trim().min(1).nullable() }).strict(),
     output: z.object({ ok: z.boolean(), unpinFailed: z.literal(true).optional() }),
   },
+  getRuntimeOverlays: {
+    input: z.object({}).strict(),
+    output: runtimeOverlaySnapshotSchema,
+  },
+  getSubthreadDefaults: {
+    input: threadIdSchema.strict(),
+    output: z
+      .object({
+        model: z.string(),
+        reasoningLevel: z.custom<NewThreadRequest["reasoningLevel"]>((value) => typeof value === "string"),
+        serviceTier: z.string(),
+        permissionMode: z.enum(["accept-edits", "auto", "full"]),
+      })
+      .strict()
+      .nullable(),
+  },
+  createSubthread: {
+    input: z
+      .object({
+        parentThreadId: z.string().trim().min(1),
+        // The host composer builds this; threads.spawn validates every field.
+        request: z.custom<NewThreadRequest>(
+          (value) => typeof value === "object" && value !== null && !Array.isArray(value),
+          "Invalid thread request",
+        ),
+      })
+      .strict(),
+    output: z.object({ threadId: z.string() }).strict(),
+  },
   deleteThread: {
     input: threadIdSchema.extend({ childThreadsConfirmed: z.boolean() }).strict(),
     output: z.object({ ok: z.boolean() }),
@@ -453,5 +483,14 @@ export const bbSidebarRpcContract = defineRpcContract({
         customUploadName: z.string().nullable(),
       })
       .strict(),
+  },
+  listThreadProjects: {
+    input: z.object({}).strict(),
+    output: z.object({ rows: z.array(z.object({ threadId: z.string(), projectId: z.string() }).strict()) }),
+  },
+  setThreadProject: {
+    // A null project files the thread under its own project again.
+    input: z.object({ threadId: z.string().trim().min(1), projectId: projectIdSchema.nullable() }).strict(),
+    output: z.object({ ok: z.literal(true) }).strict(),
   },
 });

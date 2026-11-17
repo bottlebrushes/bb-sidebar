@@ -1,4 +1,6 @@
 // Actual package icons, loaded through leaf exports in isolated test workers.
+export { default as Add01Icon } from "@hugeicons/core-free-icons/Add01Icon";
+export { default as Alert02Icon } from "@hugeicons/core-free-icons/Alert02Icon";
 export { default as ArrowDown01Icon } from "@hugeicons/core-free-icons/ArrowDown01Icon";
 export { default as ArrowLeft01Icon } from "@hugeicons/core-free-icons/ArrowLeft01Icon";
 export { default as ArrowRight01Icon } from "@hugeicons/core-free-icons/ArrowRight01Icon";
@@ -16,20 +18,29 @@ export { default as ComputerTerminal01Icon } from "@hugeicons/core-free-icons/Co
 export { default as Mail01Icon } from "@hugeicons/core-free-icons/Mail01Icon";
 export { default as MailOpen01Icon } from "@hugeicons/core-free-icons/MailOpen01Icon";
 export { default as Edit02Icon } from "@hugeicons/core-free-icons/Edit02Icon";
+export { default as Delete02Icon } from "@hugeicons/core-free-icons/Delete02Icon";
 export { default as FolderGitIcon } from "@hugeicons/core-free-icons/FolderGitIcon";
 export { default as GitBranchIcon } from "@hugeicons/core-free-icons/GitBranchIcon";
 export { default as GitPullRequestIcon } from "@hugeicons/core-free-icons/GitPullRequestIcon";
 export { default as HelpCircleIcon } from "@hugeicons/core-free-icons/HelpCircleIcon";
+export { default as Link01Icon } from "@hugeicons/core-free-icons/Link01Icon";
+export { default as LinkSquare02Icon } from "@hugeicons/core-free-icons/LinkSquare02Icon";
+export { default as Notification01Icon } from "@hugeicons/core-free-icons/Notification01Icon";
+export { default as NotificationOff01Icon } from "@hugeicons/core-free-icons/NotificationOff01Icon";
 export { default as Loading03Icon } from "@hugeicons/core-free-icons/Loading03Icon";
 export { default as PauseCircleIcon } from "@hugeicons/core-free-icons/PauseCircleIcon";
 export { default as PinIcon } from "@hugeicons/core-free-icons/PinIcon";
 export { default as PinOffIcon } from "@hugeicons/core-free-icons/PinOffIcon";
 export { default as PlugSocketIcon } from "@hugeicons/core-free-icons/PlugSocketIcon";
 export { default as Pulse01Icon } from "@hugeicons/core-free-icons/Pulse01Icon";
+export { default as PowerIcon } from "@hugeicons/core-free-icons/PowerIcon";
+export { default as RefreshIcon } from "@hugeicons/core-free-icons/RefreshIcon";
 export { default as PulseRectangle01Icon } from "@hugeicons/core-free-icons/PulseRectangle01Icon";
 export { default as Search01Icon } from "@hugeicons/core-free-icons/Search01Icon";
 export { default as StopCircleIcon } from "@hugeicons/core-free-icons/StopCircleIcon";
+export { default as Target02Icon } from "@hugeicons/core-free-icons/Target02Icon";
 export { default as Tick02Icon } from "@hugeicons/core-free-icons/Tick02Icon";
 export { default as UserAdd01Icon } from "@hugeicons/core-free-icons/UserAdd01Icon";
+export { default as Unlink01Icon } from "@hugeicons/core-free-icons/Unlink01Icon";
 export { default as WorkflowCircle03Icon } from "@hugeicons/core-free-icons/WorkflowCircle03Icon";
 export { default as Yoga02Icon } from "@hugeicons/core-free-icons/Yoga02Icon";

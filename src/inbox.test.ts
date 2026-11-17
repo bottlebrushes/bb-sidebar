@@ -17,6 +17,7 @@ import {
   threadTitleHasMentions,
   visibleInboxThreads,
 } from "./inbox";
+import { placeThreadsInProjects } from "./thread-projects";
 
 describe("sortByCreatedAtDescending", () => {
   it("puts the newest thread first", () => {
@@ -160,6 +161,20 @@ describe("filtering", () => {
     const threads = [thread({ id: "a", projectId: "p1" }), thread({ id: "b", projectId: "p2" })];
     expect(filterByProjects(threads, ["p1"]).map((t) => t.id)).toEqual(["a"]);
     expect(filterByProjects(threads, [])).toHaveLength(2);
+  });
+
+  it("scopes a placed thread under its chosen project, unless that project is gone", () => {
+    const threads = [thread({ id: "moved", projectId: "personal" }), thread({ id: "stale", projectId: "personal" })];
+    const placed = placeThreadsInProjects(
+      threads,
+      new Map([
+        ["moved", "p1"],
+        ["stale", "removed"],
+      ]),
+      [{ id: "personal" }, { id: "p1" }],
+    );
+    expect(filterByProjects(placed, ["p1"]).map((t) => t.id)).toEqual(["moved"]);
+    expect(filterByProjects(placed, ["personal"]).map((t) => t.id)).toEqual(["stale"]);
   });
 
   it("drops archived threads", () => {

@@ -8,6 +8,9 @@ import { ParentChip } from "./src/ParentChip";
 import { SidebarSettings } from "./src/SidebarSettings";
 import { registerThreadHeaderAction } from "./src/bb-sdk";
 import { registerSnoozeCommands } from "./src/lib/snooze-commands";
+import { SubthreadComposer } from "./src/SubthreadComposer";
+import { CARD_PAGE_PATH, CardPage, CardPageHeader } from "./src/board/ui/CardPage";
+import { openSubthreadComposer } from "./src/useSubthreadComposer";
 
 export default definePluginApp((app) => {
   app.slots.settingsSection({
@@ -34,4 +37,30 @@ export default definePluginApp((app) => {
   // Palette commands act on the thread in view, so a thread can be snoozed
   // without finding its row.
   registerSnoozeCommands(app.commands);
+
+  // One composer per window, shared by the row menu and the command.
+  app.slots.experimental_appOverlay({
+    id: "subthread-composer",
+    component: SubthreadComposer,
+  });
+  app.commands.register({
+    id: "new-subthread",
+    title: "New subthread",
+    defaultShortcut: { key: "n", mod: true, alt: true },
+    isAvailable: ({ threadId }) => threadId !== null,
+    run: ({ threadId }) => {
+      if (threadId !== null) openSubthreadComposer(threadId);
+    },
+  });
+
+  // A board card without a thread: its own route, so back and forward walk
+  // between cards, with the card's Linear issue on the title bar.
+  app.slots.navPanel({
+    id: "card",
+    title: "Board card",
+    icon: "LayoutDashboard",
+    path: CARD_PAGE_PATH,
+    component: CardPage,
+    headerContent: CardPageHeader,
+  });
 });

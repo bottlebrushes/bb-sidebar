@@ -33,6 +33,8 @@
   --bb-sidebar-amber-950: var(--color-amber-950, oklch(27.9% 0.077 45.635));
   --bb-sidebar-orange-300: var(--color-orange-300, oklch(83.7% 0.128 66.29));
   --bb-sidebar-orange-600: var(--color-orange-600, oklch(64.6% 0.222 41.116));
+  --bb-sidebar-yellow-400: var(--color-yellow-400, oklch(85.2% 0.199 91.936));
+  --bb-sidebar-yellow-600: var(--color-yellow-600, oklch(68.1% 0.162 75.834));
   --bb-sidebar-emerald-100: var(--color-emerald-100, oklch(95% 0.052 163.051));
   --bb-sidebar-emerald-200: var(--color-emerald-200, oklch(90.5% 0.093 164.15));
   --bb-sidebar-emerald-300: var(--color-emerald-300, oklch(84.5% 0.143 164.978));
@@ -85,6 +87,8 @@
    * taken by Draft and Queued.
    */
   --bb-sidebar-tone-command: var(--foreground);
+  /* A thread waiting on its paused or resuming machine. */
+  --bb-sidebar-tone-host: var(--bb-sidebar-yellow-600);
 
   --bb-sidebar-woke: var(--bb-sidebar-amber-700);
 
@@ -152,6 +156,7 @@
    * toward white.
    */
   --bb-sidebar-tone-command: color-mix(in oklch, var(--foreground) 45%, white);
+  --bb-sidebar-tone-host: var(--bb-sidebar-yellow-400);
 
   --bb-sidebar-woke: var(--bb-sidebar-amber-300);
 

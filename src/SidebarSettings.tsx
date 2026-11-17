@@ -19,6 +19,7 @@ import { configuredSnoozePresetError, parseConfiguredSnoozePresets } from "./lif
 import { isValidInactiveAfterHours } from "./inactive";
 import { isValidAutoSettleAfterDays } from "./auto-settle";
 import type { SaveStatus } from "./settings-ui";
+import { BoardSettings } from "./board/ui/BoardSettings";
 
 /** Long enough to finish typing a shortcut, short enough to feel instant. */
 const SAVE_DELAY_MS = 500;
@@ -217,6 +218,7 @@ export function SidebarSettings() {
 
   return (
     <div className="max-w-3xl space-y-8 pb-4">
+      <BoardSettings />
       <SidebarLayoutSettings
         draft={draft}
         update={update}

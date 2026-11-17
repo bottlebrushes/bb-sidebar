@@ -4,6 +4,11 @@ import { readdirSync, readFileSync } from "node:fs";
 // Production/scripts get 500 lines, tests 1,000. A recorded ceiling is a cap; staying under it passes.
 const debtLimits = {
   "src/ThreadCard.tsx": 574,
+  // The board arrived from a fork before these budgets; split before growing them.
+  "src/board/server/index.ts": 1454,
+  "src/board/server/store.ts": 1033,
+  "src/board/ui/BoardSettings.tsx": 552,
+  "src/board/ui/BoardView.tsx": 918,
 };
 const files = [
   "app.tsx",
