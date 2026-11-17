@@ -7,7 +7,8 @@
 // inside each `collapsible-body`, so the variable alone no longer widens the
 // content. While the thread list is mounted, this module takes that handle's
 // drag (capture-phase listener, so bb's never starts) and overrides the
-// variable and those wrapper widths with !important rules. Unmounting removes
+// variable and those wrapper widths with !important rules, scoped to bb's
+// `md` breakpoint so the phone drawer keeps bb's own width. Unmounting removes
 // the rules and bb's own width applies again. If bb renames the handle or the
 // elements, nothing here matches and bb's behaviour is untouched.
 import { useEffect, useSyncExternalStore } from "react";
@@ -110,11 +111,13 @@ function setState(next: SidebarWidthState, persist: boolean) {
   for (const listener of listeners) listener();
 }
 
+/** Desktop only: in the phone drawer bb sizes the content from `--sidebar-width-mobile`. */
 function overrideRules(dragging: boolean): string {
   const width =
     `[data-sidebar="gap"],[data-sidebar="panel"]{--sidebar-width:var(${WIDTH_VARIABLE})!important}` +
     `[data-sidebar="collapsible-body"]>[style*="width"]{width:calc(var(${WIDTH_VARIABLE}) - var(--sidebar-rail-width))!important}`;
-  return dragging ? `${width}[data-sidebar="gap"],[data-sidebar="panel"]{transition:none!important}` : width;
+  const rules = dragging ? `${width}[data-sidebar="gap"],[data-sidebar="panel"]{transition:none!important}` : width;
+  return `@media (min-width:${DESKTOP_MIN_VIEWPORT}px){${rules}}`;
 }
 
 function installOverride(): () => void {
