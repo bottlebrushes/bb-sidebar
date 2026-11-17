@@ -2,11 +2,14 @@
 // 460 px cap: wider than that, the sidebar shows the board.
 //
 // bb sizes the sidebar with an inline `--sidebar-width` on two elements and
-// clamps its own drag handle to 240–460 px. While the thread list is mounted,
-// this module takes that handle's drag (capture-phase listener, so bb's never
-// starts) and overrides the variable with an !important rule. Unmounting
-// removes the rule and bb's own width applies again. If bb renames the handle
-// or the elements, nothing here matches and bb's behaviour is untouched.
+// clamps its own drag handle to 240–460 px. Since 0.49 it also writes that
+// width as a literal px value (`width: calc(320px - <rail>)`) on the wrappers
+// inside each `collapsible-body`, so the variable alone no longer widens the
+// content. While the thread list is mounted, this module takes that handle's
+// drag (capture-phase listener, so bb's never starts) and overrides the
+// variable and those wrapper widths with !important rules. Unmounting removes
+// the rules and bb's own width applies again. If bb renames the handle or the
+// elements, nothing here matches and bb's behaviour is untouched.
 import { useSyncExternalStore } from "react";
 
 export const MIN_WIDTH = 240;
@@ -116,7 +119,9 @@ function setState(next: SidebarWidthState, persist: boolean) {
 }
 
 function overrideRules(dragging: boolean): string {
-  const width = `[data-sidebar="gap"],[data-sidebar="panel"]{--sidebar-width:var(${WIDTH_VARIABLE})!important}`;
+  const width =
+    `[data-sidebar="gap"],[data-sidebar="panel"]{--sidebar-width:var(${WIDTH_VARIABLE})!important}` +
+    `[data-sidebar="collapsible-body"]>[style*="width"]{width:calc(var(${WIDTH_VARIABLE}) - var(--sidebar-rail-width))!important}`;
   return dragging
     ? `${width}[data-sidebar="gap"],[data-sidebar="panel"]{transition:none!important}`
     : width;
