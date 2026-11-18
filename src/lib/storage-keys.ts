@@ -37,6 +37,7 @@ export const STORAGE_KEYS = {
   boardLinearProject: { key: "bb-sidebar:board-linear-project:v1", evictionPriority: 86.1 },
   boardHiddenColumns: { key: "bb-sidebar:board-hidden-columns:v1", evictionPriority: 86.2 },
   boardSort: { key: "bb-sidebar:board-sort:v1", evictionPriority: 86.3 },
+  boardPinnedCards: { key: "bb-sidebar:board-pinned-cards:v1", evictionPriority: 86.4 },
 } as const;
 
 /** bb's composer draft for a "New subthread" under this parent; bb stores it, not this plugin. */

@@ -18,6 +18,7 @@ import { SubCardBadge, SubCardList, type SubCardLookup } from "./SubCardList";
 
 export type CardAction =
   | { kind: "open" }
+  | { kind: "pin" }
   | { kind: "startOwn" }
   | { kind: "block" }
   | { kind: "unblock"; blockerCardId: string }
@@ -163,6 +164,7 @@ export function BoardCardView({
         )}
       >
         <div className="flex min-w-0 items-center gap-1.5 text-[11px] leading-4 text-muted-foreground">
+          {item.pinned ? <Icon name="Pin" className="size-3 shrink-0" aria-label="Pinned" /> : null}
           <PriorityMark priority={card.priority} />
           {card.linear ? <span className="shrink-0 font-medium tabular-nums">{card.linear.identifier}</span> : null}
           {projectName ? (
@@ -363,6 +365,10 @@ function CardMenu({
           aria-label="Card actions"
           className="z-50 min-w-48 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-md"
         >
+          <Item icon={item.pinned ? "PinOff" : "Pin"} onSelect={() => onAction({ kind: "pin" })}>
+            {item.pinned ? "Unpin card" : "Pin card"}
+          </Item>
+          <Separator />
           {item.coveredBy ? (
             <>
               <Item icon="Add" onSelect={() => onAction({ kind: "startOwn" })}>
