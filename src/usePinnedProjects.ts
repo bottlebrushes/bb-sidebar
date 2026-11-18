@@ -6,10 +6,17 @@ import { STORAGE_KEYS } from "./lib/storage-keys";
 import { usePersistedPreference } from "./lib/use-persisted-preference";
 import { movePinnedId } from "./pinned-order";
 
+/** Project shortcuts saved on this device, in pin order, with their edits. */
+export interface ProjectPins {
+  pinnedProjects: string[];
+  toggleProjectPin(projectId: string): void;
+  moveProjectPin(projectId: string, targetId: string, placement: "before" | "after"): void;
+}
+
 export function usePinnedProjects({
   projects,
   status,
-}: Pick<ReturnType<typeof useSidebarThreads>, "projects" | "status">) {
+}: Pick<ReturnType<typeof useSidebarThreads>, "projects" | "status">): ProjectPins {
   const [pinnedProjects, setPinnedProjects] = usePersistedPreference(
     STORAGE_KEYS.pinnedProjects.key,
     pinnedProjectsCodec,

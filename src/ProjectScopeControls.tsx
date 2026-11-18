@@ -1,9 +1,7 @@
-import type { useSidebarThreads } from "./bb-sdk";
 import { useInboxActions, useInboxEnvironment } from "./InboxContext";
 import { ProjectScopeSelect } from "./ProjectScopeSelect";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { projectIconUrl } from "./project-icons";
-import { usePinnedProjects } from "./usePinnedProjects";
 import { cn } from "./lib/utils";
 import { useState, type DragEvent } from "react";
 
@@ -12,16 +10,9 @@ function dropPlacement(event: DragEvent<HTMLButtonElement>) {
   return event.clientX < rect.left + rect.width / 2 ? "before" : "after";
 }
 
-export function ProjectScopeControls({
-  scope,
-  status,
-}: {
-  scope: readonly string[];
-  status: ReturnType<typeof useSidebarThreads>["status"];
-}) {
-  const { projects, projectIconRevision } = useInboxEnvironment();
-  const { setScope } = useInboxActions();
-  const { pinnedProjects, toggleProjectPin, moveProjectPin } = usePinnedProjects({ projects, status });
+export function ProjectScopeControls({ scope }: { scope: readonly string[] }) {
+  const { projects, projectIconRevision, pinnedProjects } = useInboxEnvironment();
+  const { setScope, toggleProjectPin, moveProjectPin } = useInboxActions();
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ id: string; placement: "before" | "after" } | null>(null);
   const clearDrag = () => {

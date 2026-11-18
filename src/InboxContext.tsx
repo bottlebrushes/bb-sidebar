@@ -22,8 +22,9 @@ import { ChildThreadDisplayContext, type ChildThreadDisplay } from "./ChildThrea
 import { OpenPortsProvider, type PortScanScope } from "./OpenPorts";
 import type { ActiveSortMode } from "./inbox-layout";
 import type { useRenamingShelfLocks } from "./useRenamingShelfLocks";
+import type { ProjectPins } from "./usePinnedProjects";
 
-interface InboxContextInputs {
+interface InboxContextInputs extends ProjectPins {
   providerById: ReadonlyMap<string, SidebarProvider>;
   projectNameById: ReadonlyMap<string, string>;
   projectIconRevision: number;
@@ -70,6 +71,9 @@ export function useInboxContextValues({
   setActiveSortMode,
   setSettledLimit,
   toggleProjectCollapse,
+  pinnedProjects,
+  toggleProjectPin,
+  moveProjectPin,
 }: InboxContextInputs) {
   const environment = useMemo(
     () => ({
@@ -81,6 +85,7 @@ export function useInboxContextValues({
       snoozePresets,
       lifecycle,
       childrenByParentId,
+      pinnedProjects,
     }),
     [
       providerById,
@@ -91,6 +96,7 @@ export function useInboxContextValues({
       snoozePresets,
       lifecycle,
       childrenByParentId,
+      pinnedProjects,
     ],
   );
   const actions = useMemo(
@@ -106,6 +112,8 @@ export function useInboxContextValues({
       setActiveSortMode,
       setSettledLimit,
       toggleProjectCollapse,
+      toggleProjectPin,
+      moveProjectPin,
       acknowledgeWake: (threadId: string) => void lifecycle.acknowledgeWake(threadId),
     }),
     [
@@ -120,6 +128,8 @@ export function useInboxContextValues({
       setActiveSortMode,
       setSettledLimit,
       toggleProjectCollapse,
+      toggleProjectPin,
+      moveProjectPin,
       lifecycle,
     ],
   );

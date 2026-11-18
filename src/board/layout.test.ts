@@ -556,3 +556,36 @@ describe("priority sort", () => {
     expect(ids(columns.find((column) => column.name === "In Progress")!.cards)).toEqual(["idle", "handled"]);
   });
 });
+
+describe("pinned projects", () => {
+  it("puts pinned projects' cards first in each merged column, in pin order, before the sort", () => {
+    const { columns } = buildLayout({
+      snapshot: snapshot({
+        columns: [...localColumns("a"), ...localColumns("b"), ...localColumns("c")],
+        cards: [
+          card("aUrgent", "a:Todo", 1, { priority: 1 }),
+          card("bLow", "b:Todo", 2, { priority: 4 }),
+          card("cHigh", "c:Todo", 3, { priority: 2 }),
+          card("bUrgent", "b:Todo", 4, { priority: 1 }),
+          card("cBlocked", "c:Todo", 5, { priority: 1 }),
+          card("aDone", "a:Done", 1),
+          card("cDone", "c:Done", 1),
+        ],
+        relations: [{ blockerCardId: "aUrgent", blockedCardId: "cBlocked" }],
+      }),
+      threads: [],
+      projectId: null,
+      projectNames: { a: "A", b: "B", c: "C" },
+      isSettled: () => false,
+      now: 2_000,
+      sort: "priority",
+      // "gone" is a pin whose project has no cards; it must not shift the rest.
+      pinnedProjectIds: ["c", "gone", "b"],
+    });
+    const cardsIn = (name: string) => ids(columns.find((column) => column.name === name)!.cards);
+    // Pinned c, then pinned b, then unpinned a; priority orders within each.
+    // A blocked card still sits under its blocker, wherever that lands.
+    expect(cardsIn("Todo")).toEqual(["cHigh", "bUrgent", "bLow", "aUrgent", "cBlocked"]);
+    expect(cardsIn("Done")).toEqual(["cDone", "aDone"]);
+  });
+});

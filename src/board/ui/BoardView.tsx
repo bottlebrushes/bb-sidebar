@@ -49,6 +49,7 @@ export function BoardView({
   projectId,
   threads,
   threadProjectIds,
+  pinnedProjectIds,
   projects,
   isSettled,
   activeThreadId,
@@ -68,6 +69,8 @@ export function BoardView({
   threads: readonly PluginSidebarThread[];
   /** Selected projects, whose threads without a card get one; empty for every project. */
   threadProjectIds: readonly string[];
+  /** Pinned projects in pin order; their cards come first in every column. */
+  pinnedProjectIds: readonly string[];
   projects: ReadonlyArray<{ id: string; name: string; isPersonal: boolean }>;
   isSettled(thread: PluginSidebarThread): boolean;
   activeThreadId: string | null;
@@ -125,6 +128,7 @@ export function BoardView({
             },
             hiddenColumns: filters.hiddenColumns,
             sort: filters.sort,
+            pinnedProjectIds,
           })
         : { columns: [], columnOptions: [] },
     [
@@ -133,6 +137,7 @@ export function BoardView({
       filters.linearProject,
       filters.sort,
       isSettled,
+      pinnedProjectIds,
       projectId,
       projectNames,
       search,

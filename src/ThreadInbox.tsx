@@ -53,6 +53,7 @@ import { usePlacedThreads } from "./useThreadProjects";
 import { RuntimeOverlayProvider } from "./RuntimeOverlays";
 import { useBoardMode } from "./board/sidebar-width";
 import { InboxBoard } from "./board/ui/InboxBoard";
+import { usePinnedProjects } from "./usePinnedProjects";
 const SETTLED_INITIAL_LIMIT = 10;
 
 type ActiveShelfKind = "pinned" | "inbox";
@@ -112,6 +113,7 @@ function ThreadInboxContent({
   const dockShelvesEnabled = sidebarSettings?.dockShelves ?? DEFAULT_SIDEBAR_SETTINGS.dockShelves;
   const workingShelfEnabled = sidebarSettings?.workingShelf ?? DEFAULT_SIDEBAR_SETTINGS.workingShelf;
   const [scope, setScope] = useProjectScope({ projects, status });
+  const projectPins = usePinnedProjects({ projects, status });
   const now = useQuantizedNow();
   const projectNameById = useMemo(() => new Map(projects.map((project) => [project.id, project.name])), [projects]);
   const [expandedChildParentIds, setExpandedChildParentIds] = usePersistedPreference(
@@ -438,6 +440,7 @@ function ThreadInboxContent({
     setActiveSortMode,
     setSettledLimit,
     toggleProjectCollapse,
+    ...projectPins,
   });
   const renderActiveThread = createInboxThreadRenderer({
     wokeThreadIds,
