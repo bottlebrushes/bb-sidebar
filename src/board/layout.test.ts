@@ -571,7 +571,10 @@ describe("pinned projects", () => {
           card("aDone", "a:Done", 1),
           card("cDone", "c:Done", 1),
         ],
-        relations: [{ blockerCardId: "aUrgent", blockedCardId: "cBlocked" }],
+        relations: [
+          { blockerCardId: "aUrgent", blockedCardId: "cBlocked" },
+          { blockerCardId: "bLow", blockedCardId: "bUrgent" },
+        ],
       }),
       threads: [],
       projectId: null,
@@ -582,10 +585,53 @@ describe("pinned projects", () => {
       // "gone" is a pin whose project has no cards; it must not shift the rest.
       pinnedProjectIds: ["c", "gone", "b"],
     });
-    const cardsIn = (name: string) => ids(columns.find((column) => column.name === name)!.cards);
+    const cardsIn = (name: string) =>
+      columns.find((column) => column.name === name)!.cards.map((entry) => `${entry.card.id}${entry.depth}`);
     // Pinned c, then pinned b, then unpinned a; priority orders within each.
-    // A blocked card still sits under its blocker, wherever that lands.
-    expect(cardsIn("Todo")).toEqual(["cHigh", "bUrgent", "bLow", "aUrgent", "cBlocked"]);
-    expect(cardsIn("Done")).toEqual(["cDone", "aDone"]);
+    // A blocked card nests under a blocker in its own group (bUrgent under
+    // bLow) but never leaves its group for one elsewhere (cBlocked).
+    expect(cardsIn("Todo")).toEqual(["cBlocked0", "cHigh0", "bLow0", "bUrgent1", "aUrgent0"]);
+    expect(cardsIn("Done")).toEqual(["cDone0", "aDone0"]);
+  });
+});
+
+describe("pinned cards", () => {
+  it("puts pinned cards first in their column, ahead of pinned projects, wherever their blocker is", () => {
+    const { columns } = buildLayout({
+      snapshot: snapshot({
+        columns: [...localColumns("a"), ...localColumns("b")],
+        cards: [
+          card("a1", "a:In Progress", 1),
+          card("aPinned", "a:In Progress", 2),
+          card("b1", "b:In Progress", 3),
+          // Pinned while its thread had no stored card yet.
+          card("aThreaded", "a:In Progress", 4, { threadId: "t_s" }),
+        ],
+        relations: [{ blockerCardId: "a1", blockedCardId: "aPinned" }],
+      }),
+      threads: [thread("t_s", "a"), thread("t_v", "a"), thread("t_u", "a")],
+      projectId: null,
+      projectNames: { a: "A", b: "B" },
+      isSettled: () => false,
+      now: 2_000,
+      pinnedProjectIds: ["b"],
+      pinnedCardIds: new Set(["aPinned", "thread:t_s", "thread:t_v", "deleted"]),
+    });
+    const cards = columns.find((column) => column.name === "In Progress")!.cards;
+    expect(cards.map((entry) => `${entry.card.id}${entry.depth}`)).toEqual([
+      "aPinned0",
+      "aThreaded0",
+      "thread:t_v0",
+      "b10",
+      "a10",
+      "thread:t_u0",
+    ]);
+    expect(cards.filter((entry) => entry.pinned).map((entry) => entry.card.id)).toEqual([
+      "aPinned",
+      "aThreaded",
+      "thread:t_v",
+    ]);
+    // Still marked blocked, though drawn above its blocker.
+    expect(cards[0]!.blockers.map((blocker) => blocker.id)).toEqual(["a1"]);
   });
 });

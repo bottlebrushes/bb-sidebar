@@ -38,6 +38,7 @@ A stable thread list for [bb](https://github.com/get-bb/bb). Threads stay where 
 - Cards show the thread working on them, including a parent card's thread for its sub-items, or **Needs agent**
 - Board filters: by Linear assignee (My cards, Everyone, Unassigned, or one person) and by column, and sorting by priority; Linear's Blocked column starts hidden
 - Pinned projects first: with several projects on the board, every column lists the cards of the projects pinned above the list first, in pin order, then the rest
+- Pinned cards: **Pin card** in a card's context menu keeps it at the top of its column, above pinned projects' cards; saved per browser
 - `bb sidebar board list | show | create | move | block | unblock | parent | duplicate | link | linear | sync` and `board_*` agent tools, so agents can move their own card, block it on another, or file sub-items
 - `bb sidebar settle` from a working thread (an agent settling itself) settles it when the turn ends
 - A machine-wait status on cards and rows while a thread's devbox is paused or resuming, and **Stuck** when queued messages stop starting

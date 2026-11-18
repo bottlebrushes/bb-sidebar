@@ -29,9 +29,9 @@ export const isSort = (value: unknown): value is CardSort =>
 const isStringList = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every((entry) => typeof entry === "string");
 
-/** The board's assignee, Linear project, and column filters, saved per browser. */
+/** The board's assignee, Linear project, and column filters, sort, and card pins, saved per browser. */
 export function useBoardFilters() {
-  const { boardAssignee, boardLinearProject, boardHiddenColumns, boardSort } = STORAGE_KEYS;
+  const { boardAssignee, boardLinearProject, boardHiddenColumns, boardSort, boardPinnedCards } = STORAGE_KEYS;
   const [assignee, setAssigneeState] = useState<AssigneeFilter>(() => read(boardAssignee.key, "me", isString));
   const [linearProject, setLinearProjectState] = useState<LinearProjectFilter>(() =>
     read(boardLinearProject.key, "all", isString),
@@ -78,6 +78,22 @@ export function useBoardFilters() {
     setHiddenState(new Set());
     write(boardHiddenColumns.key, []);
   }, [boardHiddenColumns.key]);
+  const [pinnedCards, setPinnedState] = useState<ReadonlySet<string>>(
+    () => new Set(read(boardPinnedCards.key, [], isStringList)),
+  );
+  /** Pins `keys[0]`, or unpins every key when any is pinned (see `cardPinKeys`). */
+  const toggleCardPin = useCallback(
+    (keys: readonly string[]) => {
+      setPinnedState((current) => {
+        const next = new Set(current);
+        if (keys.some((key) => next.has(key))) for (const key of keys) next.delete(key);
+        else next.add(keys[0]!);
+        write(boardPinnedCards.key, [...next]);
+        return next;
+      });
+    },
+    [boardPinnedCards.key],
+  );
   return {
     assignee,
     setAssignee,
@@ -88,5 +104,7 @@ export function useBoardFilters() {
     showAllColumns,
     sort,
     setSort,
+    pinnedCards,
+    toggleCardPin,
   };
 }

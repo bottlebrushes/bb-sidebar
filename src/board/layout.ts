@@ -20,6 +20,8 @@ export interface LayoutCard {
   card: BoardCard;
   /** True for a thread with no stored card; moving it creates one. */
   virtual: boolean;
+  /** Pinned on this device: drawn first in its column. */
+  pinned: boolean;
   thread: PluginSidebarThread | null;
   /** Indentation under a blocker in the same column. */
   depth: number;
@@ -94,6 +96,22 @@ interface LayoutInput {
    * before the sort applies; other projects' cards follow.
    */
   pinnedProjectIds?: readonly string[];
+  /**
+   * Pinned cards: a stored card id, or `thread:<thread id>` for a thread's
+   * card, which also matches the stored card the thread gets later. Pinned
+   * cards come first in their column, ahead of pinned projects.
+   */
+  pinnedCardIds?: ReadonlySet<string>;
+}
+
+/**
+ * Keys a card pin may be saved under: its own id, and for a card with a
+ * thread the thread's card id, so a pin made while the thread had no stored
+ * card still holds after it gets one.
+ */
+export function cardPinKeys(card: BoardCard): string[] {
+  const threadKey = card.threadId ? `${VIRTUAL_PREFIX}${card.threadId}` : null;
+  return threadKey && threadKey !== card.id ? [card.id, threadKey] : [card.id];
 }
 
 export type CardSort = "board" | "priority" | "priority-unread";
@@ -224,31 +242,36 @@ function virtualCards(
  * its first blocker by position when it has several), one level deeper.
  * Blocking loops are broken by leaving the loop's first card at the top.
  * "priority" orders by priority first; "priority-unread" puts cards that
- * are not running above running ones, each group by priority. `projectRank`
- * goes before all of these: lower ranks (pinned projects) come first.
+ * are not running above running ones, each group by priority. `rank` goes
+ * before all of these: lower ranks (pinned cards, then pinned projects) come
+ * first, and a card nests under a blocker only of the same rank, so pins
+ * always hold their place.
  */
 export function orderColumn(
   cards: readonly BoardCard[],
   relations: readonly BoardRelation[],
   sort: CardSort = "board",
   isUnread: (card: BoardCard) => boolean = () => false,
-  projectRank: (card: BoardCard) => number = () => 0,
+  rank: (card: BoardCard) => number = () => 0,
 ): Array<{ card: BoardCard; depth: number }> {
   const unread = sort === "priority-unread" ? new Set(cards.filter(isUnread).map((card) => card.id)) : null;
   const sorted = [...cards].sort(
     (a, b) =>
-      projectRank(a) - projectRank(b) ||
+      rank(a) - rank(b) ||
       (unread ? Number(unread.has(b.id)) - Number(unread.has(a.id)) : 0) ||
       (sort === "board" ? 0 : priorityRank(a.priority) - priorityRank(b.priority)) ||
       a.position - b.position ||
       a.id.localeCompare(b.id),
   );
-  const inColumn = new Set(sorted.map((card) => card.id));
+  const rankById = new Map(sorted.map((card) => [card.id, rank(card)]));
   const index = new Map(sorted.map((card, position) => [card.id, position]));
   const anchor = new Map<string, string>();
   for (const card of sorted) {
     const blockers = relations
-      .filter((relation) => relation.blockedCardId === card.id && inColumn.has(relation.blockerCardId))
+      .filter(
+        (relation) =>
+          relation.blockedCardId === card.id && rankById.get(relation.blockerCardId) === rankById.get(card.id),
+      )
       .map((relation) => relation.blockerCardId)
       .sort((a, b) => index.get(a)! - index.get(b)!);
     if (blockers[0]) anchor.set(card.id, blockers[0]);
@@ -402,7 +425,11 @@ export function buildLayout(input: LayoutInput): BoardLayout {
     cardsByGroup.set(group, list);
   }
   const pinRank = new Map((input.pinnedProjectIds ?? []).map((id, index) => [id, index]));
-  const projectRank = (card: BoardCard) => pinRank.get(card.projectId) ?? pinRank.size;
+  const pinnedCards = input.pinnedCardIds ?? new Set<string>();
+  const isPinned = (card: BoardCard) => cardPinKeys(card).some((key) => pinnedCards.has(key));
+  // Pinned cards (by project pin order among themselves), then pinned projects, then the rest.
+  const rank = (card: BoardCard) =>
+    (isPinned(card) ? 0 : pinRank.size + 1) + (pinRank.get(card.projectId) ?? pinRank.size);
   for (const [group, cards] of cardsByGroup) {
     // Top group under "priority-unread": every card that is not running.
     // A card without a thread of its own runs when the ancestor thread
@@ -413,12 +440,13 @@ export function buildLayout(input: LayoutInput): BoardLayout {
       const thread = threadId ? threadsById.get(threadId) : undefined;
       return !thread || !isThreadWorking(thread);
     };
-    group.cards = orderColumn(cards, relations, input.sort, isIdle, projectRank).map(({ card, depth }) => {
+    group.cards = orderColumn(cards, relations, input.sort, isIdle, rank).map(({ card, depth }) => {
       const covering = coveringAncestor(card, cardsById);
       const items = subItems.get(card.id) ?? [];
       return {
         card,
         virtual: card.id.startsWith(VIRTUAL_PREFIX),
+        pinned: isPinned(card),
         thread: card.threadId ? (threadsById.get(card.threadId) ?? null) : null,
         depth,
         blockers: relations

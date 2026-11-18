@@ -7,7 +7,14 @@ import type { SidebarProvider } from "../../ProviderGlyph";
 import { projectIconUrl } from "../../project-icons";
 import { relativeTimeLabel } from "../../relative-time";
 import type { BoardCard, boardRpcContract, BoardSnapshot } from "../contract";
-import { buildLayout, cardPassesFilters, coveringAncestor, type LayoutCard, type LayoutColumn } from "../layout";
+import {
+  buildLayout,
+  cardPassesFilters,
+  cardPinKeys,
+  coveringAncestor,
+  type LayoutCard,
+  type LayoutColumn,
+} from "../layout";
 import { threadDisplayTitle } from "../../inbox";
 import { canParkThread } from "../../lifecycle";
 import { Popover, PopoverContent, PopoverTrigger } from "../../components/Popover";
@@ -129,12 +136,14 @@ export function BoardView({
             hiddenColumns: filters.hiddenColumns,
             sort: filters.sort,
             pinnedProjectIds,
+            pinnedCardIds: filters.pinnedCards,
           })
         : { columns: [], columnOptions: [] },
     [
       filters.assignee,
       filters.hiddenColumns,
       filters.linearProject,
+      filters.pinnedCards,
       filters.sort,
       isSettled,
       pinnedProjectIds,
@@ -255,6 +264,9 @@ export function BoardView({
     switch (action.kind) {
       case "open":
         openCard(item.card);
+        return;
+      case "pin":
+        filters.toggleCardPin(cardPinKeys(item.card));
         return;
       case "startOwn":
         startThread(item.card);
