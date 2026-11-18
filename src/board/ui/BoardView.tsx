@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ComponentProps, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useBbNavigate, useRpc, type PluginSidebarThread } from "@get-bb/plugin-sdk/app";
 import { toast } from "../../lib/toast";
 import { Icon } from "../../components/Icon";
@@ -17,30 +17,7 @@ import { BoardCardView, type CardAction } from "./BoardCardView";
 import { ConfirmDialog, PickerDialog, TextDialog } from "./dialogs";
 import { useBoard } from "./useBoard";
 import { CARD_PAGE_PATH } from "./CardPage";
-
-/**
- * A board toolbar select. The native control is drawn without its platform
- * chrome: macOS's popup button has fixed metrics that clip 11px text in a
- * 24px-tall control, so the select keeps its own height and line box and a
- * chevron is drawn over it instead.
- */
-function ToolbarSelect({ className, children, ...props }: ComponentProps<"select">) {
-  return (
-    <span className={cn("relative inline-flex h-6 shrink-0 items-center", className)}>
-      <select
-        {...props}
-        className="h-6 w-full min-w-0 cursor-pointer appearance-none truncate rounded border border-border bg-background py-0 pl-1.5 pr-5 text-[11px] leading-[22px] text-foreground hover:bg-accent disabled:cursor-default disabled:opacity-50"
-      >
-        {children}
-      </select>
-      <Icon
-        name="ChevronDown"
-        className="pointer-events-none absolute right-1 size-3 text-muted-foreground"
-        aria-hidden
-      />
-    </span>
-  );
-}
+import { ToolbarSelect } from "./ToolbarSelect";
 
 type Dialog = {
   kind: "block" | "parent" | "duplicate" | "link" | "rename" | "linearProject" | "delete";
@@ -71,6 +48,7 @@ function ErrorLines({ lines }: { lines: string[] }) {
 export function BoardView({
   projectId,
   threads,
+  threadProjectIds,
   projects,
   isSettled,
   activeThreadId,
@@ -86,7 +64,10 @@ export function BoardView({
 }: {
   /** One project, or null for every project. */
   projectId: string | null;
+  /** Every thread: a card's thread may run in a project outside the selection. */
   threads: readonly PluginSidebarThread[];
+  /** Selected projects, whose threads without a card get one; empty for every project. */
+  threadProjectIds: readonly string[];
   projects: ReadonlyArray<{ id: string; name: string; isPersonal: boolean }>;
   isSettled(thread: PluginSidebarThread): boolean;
   activeThreadId: string | null;
@@ -126,6 +107,7 @@ export function BoardView({
         ? buildLayout({
             snapshot,
             threads,
+            threadProjectIds,
             projectId,
             projectNames,
             isSettled,
@@ -158,6 +140,7 @@ export function BoardView({
       snapshot,
       threads,
       threadsById,
+      threadProjectIds,
       viewerId,
     ],
   );

@@ -287,6 +287,31 @@ describe("buildLayout", () => {
       count: 1,
     });
   });
+
+  it("shows a card's thread from a project outside the selection, but cards no unselected thread", () => {
+    const { columns } = buildLayout({
+      snapshot: snapshot({
+        columns: [...localColumns("front"), ...localColumns("back")],
+        cards: [
+          card("issue", "front:In Progress", 1, {
+            threadId: "t_backend",
+            linear: { issueId: "i1", identifier: "TRA-1", url: "u" },
+          }),
+          card("local", "front:Todo", 1, { threadId: "t_backend_local" }),
+        ],
+      }),
+      threads: [thread("t_backend", "back"), thread("t_backend_local", "back"), thread("t_loose", "back")],
+      threadProjectIds: ["front"],
+      projectId: null,
+      projectNames: {},
+      isSettled: () => false,
+      now: 2_000,
+    });
+    const cards = columns.flatMap((entry) => entry.cards);
+    expect(ids(cards).sort()).toEqual(["issue", "local"]);
+    expect(cards.find((entry) => entry.card.id === "issue")!.thread?.id).toBe("t_backend");
+    expect(cards.find((entry) => entry.card.id === "local")!.thread?.id).toBe("t_backend_local");
+  });
 });
 
 describe("cards of archived threads", () => {

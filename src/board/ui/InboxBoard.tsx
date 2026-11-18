@@ -1,14 +1,14 @@
 import type { PluginSidebarThread } from "@get-bb/plugin-sdk/app";
 import { useInboxActions, useInboxActivity, useInboxEnvironment } from "../../InboxContext";
-import { filterByProjects } from "../../inbox";
 import { DEFAULT_SIDEBAR_SETTINGS } from "../../sidebar-settings";
 import { BoardView } from "./BoardView";
 
 /**
  * The board in place of the inbox's shelves, fed from the inbox context so it
  * shares child expansion, settle, and navigation with the list. One selected
- * project shows that project's columns; none or several show every project's,
- * with only the selected projects' threads.
+ * project shows that project's columns; none or several show every project's.
+ * Only the selected projects' threads get cards of their own, but a card shows
+ * its linked thread from any project.
  */
 export function InboxBoard({
   scope,
@@ -26,7 +26,8 @@ export function InboxBoard({
   return (
     <BoardView
       projectId={scope.length === 1 ? scope[0]! : null}
-      threads={scope.length > 0 ? filterByProjects(threads, scope) : threads}
+      threads={threads}
+      threadProjectIds={scope}
       projects={projects}
       isSettled={(thread) => lifecycle.settledAtFor(thread) !== null}
       activeThreadId={activeThreadId}

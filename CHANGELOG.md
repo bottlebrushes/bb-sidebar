@@ -40,6 +40,7 @@
 ### Fixed
 
 - **No late "moved to Done" from the board.** A board notice to a working thread waits in bb's queue, and bb can hold it for days (a manual stop pauses the queue; an archived thread or offline machine never drains it). Delivered later, it announced a column the card had left: a thread unarchived after its card went back to In Progress was told "moved from QA to Done … This thread is archived now." The board now withdraws its queued notices to a thread when the card moves again, when the thread is archived, and when the card is linked to another thread. Before announcing a card in a shipped column or archiving its thread, it reads the issue from Linear and does neither unless Linear has it in a shipped state at that moment. Linear syncs of one project no longer overlap, so an older read cannot land after a newer one.
+- **Board cards show their thread from another project.** With a project filter on, a card whose thread runs in a project outside the filter (a trace-frontend issue worked in a trace-backend thread) lost its working spinner, status, provider icon and settle checkmark, and a card without a Linear issue disappeared. The filter now only decides which threads without a card get one.
 
 ## [0.3.12] - 2026-11-16
 
