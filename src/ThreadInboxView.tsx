@@ -96,7 +96,7 @@ export function ThreadInboxView({
   return (
     <div data-bb-sidebar-root="" className="flex min-h-0 flex-1 flex-col">
       {/* Project scope is plugin-owned; New thread lives in bb's chrome. */}
-      <ProjectScopeControls scope={scope} status={status} />
+      <ProjectScopeControls scope={scope} />
 
       <p role="status" aria-live="polite" className="sr-only">
         {reorderAnnouncement}

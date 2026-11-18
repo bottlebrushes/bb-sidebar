@@ -89,6 +89,11 @@ interface LayoutInput {
   hiddenColumns?: ReadonlySet<string>;
   /** Card order within a column; defaults to the board's own order. */
   sort?: CardSort;
+  /**
+   * Pinned projects, in pin order. Their cards come first in every column,
+   * before the sort applies; other projects' cards follow.
+   */
+  pinnedProjectIds?: readonly string[];
 }
 
 export type CardSort = "board" | "priority" | "priority-unread";
@@ -219,17 +224,20 @@ function virtualCards(
  * its first blocker by position when it has several), one level deeper.
  * Blocking loops are broken by leaving the loop's first card at the top.
  * "priority" orders by priority first; "priority-unread" puts cards that
- * are not running above running ones, each group by priority.
+ * are not running above running ones, each group by priority. `projectRank`
+ * goes before all of these: lower ranks (pinned projects) come first.
  */
 export function orderColumn(
   cards: readonly BoardCard[],
   relations: readonly BoardRelation[],
   sort: CardSort = "board",
   isUnread: (card: BoardCard) => boolean = () => false,
+  projectRank: (card: BoardCard) => number = () => 0,
 ): Array<{ card: BoardCard; depth: number }> {
   const unread = sort === "priority-unread" ? new Set(cards.filter(isUnread).map((card) => card.id)) : null;
   const sorted = [...cards].sort(
     (a, b) =>
+      projectRank(a) - projectRank(b) ||
       (unread ? Number(unread.has(b.id)) - Number(unread.has(a.id)) : 0) ||
       (sort === "board" ? 0 : priorityRank(a.priority) - priorityRank(b.priority)) ||
       a.position - b.position ||
@@ -393,6 +401,8 @@ export function buildLayout(input: LayoutInput): BoardLayout {
     list.push(card);
     cardsByGroup.set(group, list);
   }
+  const pinRank = new Map((input.pinnedProjectIds ?? []).map((id, index) => [id, index]));
+  const projectRank = (card: BoardCard) => pinRank.get(card.projectId) ?? pinRank.size;
   for (const [group, cards] of cardsByGroup) {
     // Top group under "priority-unread": every card that is not running.
     // A card without a thread of its own runs when the ancestor thread
@@ -403,7 +413,7 @@ export function buildLayout(input: LayoutInput): BoardLayout {
       const thread = threadId ? threadsById.get(threadId) : undefined;
       return !thread || !isThreadWorking(thread);
     };
-    group.cards = orderColumn(cards, relations, input.sort, isIdle).map(({ card, depth }) => {
+    group.cards = orderColumn(cards, relations, input.sort, isIdle, projectRank).map(({ card, depth }) => {
       const covering = coveringAncestor(card, cardsById);
       const items = subItems.get(card.id) ?? [];
       return {
