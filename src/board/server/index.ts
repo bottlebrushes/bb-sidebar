@@ -513,28 +513,9 @@ export function createBoardServer(bb: BbPluginApi, db: Database.Database): Board
   }
 
   /**
-   * A card whose thread starts work leaves backlog and todo columns for the
-   * first started column (In Progress), in Linear too. Later columns stay.
-   */
-  async function startCard(card: CardRow) {
-    const columns = store.columns(card.project_id);
-    const category = columns.find((column) => column.id === card.column_id)?.category;
-    const started = columns.find((column) => column.category === "started");
-    if (!started || (category !== "backlog" && category !== "unstarted")) return;
-    try {
-      await moveCard({ cardId: card.id, columnId: started.id }, null);
-    } catch (error) {
-      bb.log.warn(
-        `moving card ${card.id} to ${started.name} failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
-      publish();
-    }
-  }
-
-  /**
    * Start a card's thread from the board's card page: spawn it with what the
-   * user chose in the composer, link it to the card (and its Linear Card
-   * chip), and move the card to In Progress.
+   * user chose in the composer and link it to the card (and its Linear Card
+   * chip). The card stays in its column; the thread moves it.
    */
   async function startCardThread(input: { cardId: string; request: NewThreadRequest }) {
     const card = store.card(input.cardId);
@@ -543,7 +524,6 @@ export function createBoardServer(bb: BbPluginApi, db: Database.Database): Board
     store.updateCard(card.id, { thread_id: thread.id });
     if (card.linear_identifier) await mirrorToLinearCard(thread.id, card.linear_identifier, true);
     publish();
-    await startCard(card);
     return { threadId: thread.id };
   }
 
@@ -786,13 +766,11 @@ export function createBoardServer(bb: BbPluginApi, db: Database.Database): Board
     });
   }
 
-  // A thread starting work is reconciled now, not at the next full sync, and
-  // its card leaves backlog and todo columns.
+  // A thread starting work is reconciled now, not at the next full sync. Its
+  // card stays in its column: only the thread (or a person) moves it.
   bb.events.on("thread.active", ({ thread }) => {
     void (async () => {
       if (await reconcileThread(thread)) publish();
-      const card = store.cardByThread(thread.id);
-      if (card) await startCard(card);
     })().catch((error: unknown) => {
       bb.log.warn(`board link for ${thread.id} failed: ${error instanceof Error ? error.message : String(error)}`);
     });

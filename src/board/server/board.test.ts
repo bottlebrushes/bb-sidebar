@@ -636,11 +636,11 @@ describe("board RPC and agent tools", () => {
     );
   });
 
-  it("starts a card's thread linked to the card and moves the card to In Progress", async () => {
+  it("starts a card's thread linked to the card and leaves the card in its column", async () => {
     const { harness, board } = await load();
     const columns = (await board()).columns;
     const todo = columns.find((column) => column.name === "Todo")!;
-    const inProgress = columns.find((column) => column.name === "In Progress")!;
+    expect(columns.find((column) => column.name === "In Progress")).toBeDefined();
     const card = (await harness.behavior.callRpc("createCard", {
       projectId: "p",
       title: "Fix the login loop",
@@ -660,40 +660,41 @@ describe("board RPC and agent tools", () => {
     expect(threadId).toBe("thr_card");
     expect((await board()).cards.find((candidate) => candidate.id === card.id)).toMatchObject({
       threadId,
-      columnId: inProgress.id,
+      columnId: todo.id,
     });
     await expect(harness.behavior.callRpc("startCardThread", { cardId: card.id, request })).rejects.toThrow(
       "already has a thread",
     );
   });
 
-  it("moves a linked card to In Progress when its thread starts working, but not one already further along", async () => {
+  it("leaves a linked card in its column when its thread starts working", async () => {
     const { harness, board } = await load();
     const columns = (await board()).columns;
+    const backlog = columns.find((column) => column.category === "backlog") ?? columns[0]!;
     const todo = columns.find((column) => column.name === "Todo")!;
-    const inProgress = columns.find((column) => column.name === "In Progress")!;
-    const review = columns.find((column) => column.name === "In Review")!;
+    const parked = (await harness.behavior.callRpc("createCard", {
+      projectId: "p",
+      title: "Parked",
+      columnId: backlog.id,
+      threadId: "thr_parked",
+    })) as BoardCard;
     const waiting = (await harness.behavior.callRpc("createCard", {
       projectId: "p",
       title: "Waiting",
       columnId: todo.id,
       threadId: "thr_waiting",
     })) as BoardCard;
-    const reviewed = (await harness.behavior.callRpc("createCard", {
-      projectId: "p",
-      title: "Reviewed",
-      columnId: review.id,
-      threadId: "thr_reviewed",
-    })) as BoardCard;
-    for (const id of ["thr_waiting", "thr_reviewed"]) {
+    for (const id of ["thr_parked", "thr_waiting"]) {
       await harness.behavior.emitThreadEvent("thread.active", {
         thread: makeThreadResponse({ id, projectId: "p", status: "active" }),
       });
     }
-    await vi.waitFor(async () => {
-      expect((await board()).cards.find((candidate) => candidate.id === waiting.id)!.columnId).toBe(inProgress.id);
-    });
-    expect((await board()).cards.find((candidate) => candidate.id === reviewed.id)!.columnId).toBe(review.id);
+    // thread.active handlers are fire-and-forget; one macrotask drains their microtask chains.
+    // (Executor form: this repo's TS lib predates Promise.withResolvers.)
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const after = (await board()).cards;
+    expect(after.find((candidate) => candidate.id === parked.id)!.columnId).toBe(backlog.id);
+    expect(after.find((candidate) => candidate.id === waiting.id)!.columnId).toBe(todo.id);
   });
 
   it("keeps each thread's board card and Linear Card chip on the same issue", async () => {
