@@ -5,7 +5,7 @@ import { readdirSync, readFileSync } from "node:fs";
 const debtLimits = {
   "src/ThreadCard.tsx": 574,
   // The board arrived from a fork before these budgets; split before growing them.
-  "src/board/server/index.ts": 1454,
+  "src/board/server/index.ts": 1381,
   "src/board/server/store.ts": 1033,
   "src/board/ui/BoardSettings.tsx": 552,
   "src/board/ui/BoardView.tsx": 918,
