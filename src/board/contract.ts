@@ -215,8 +215,8 @@ export const boardRpcContract = defineRpcContract({
     output: z.object({ prompt: z.string() }).strict(),
   },
   /**
-   * Start a card's thread from the card page: spawn it, link it to the card
-   * and its Linear Card chip, and move a backlog or todo card to In Progress.
+   * Start a card's thread from the card page: spawn it and link it to the card
+   * and its Linear Card chip. The card keeps its column; the thread moves it.
    */
   startCardThread: {
     input: z
