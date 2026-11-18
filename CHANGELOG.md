@@ -37,6 +37,10 @@
 
 - **New default settings.** A new install, and any install that has never saved its sidebar settings, now starts with shelves docked to the bottom, child threads listed newest first with their provider icons instead of colour circles, and project colors on with no stripes: project names are coloured and rows have no stripe. "Dock shelves to the bottom" is no longer marked experimental. "Settle quiet threads" is now off for new installs. An install that already had sidebar data keeps settling quiet threads, as with "Settle finished pull requests" when that became opt-in: the switch stays on until you turn it off, and saving any other setting keeps it on. Saved settings keep their values.
 
+### Fixed
+
+- **No late "moved to Done" from the board.** A board notice to a working thread waits in bb's queue, and bb can hold it for days (a manual stop pauses the queue; an archived thread or offline machine never drains it). Delivered later, it announced a column the card had left: a thread unarchived after its card went back to In Progress was told "moved from QA to Done … This thread is archived now." The board now withdraws its queued notices to a thread when the card moves again, when the thread is archived, and when the card is linked to another thread. Before announcing a card in a shipped column or archiving its thread, it reads the issue from Linear and does neither unless Linear has it in a shipped state at that moment. Linear syncs of one project no longer overlap, so an older read cannot land after a newer one.
+
 ## [0.3.12] - 2026-11-16
 
 ### Changed
