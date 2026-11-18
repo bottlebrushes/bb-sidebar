@@ -47,10 +47,14 @@ export function createCardNotices(bb: BbPluginApi, store: BoardStore, linear: Li
         const first = message.content[0];
         const text = first?.type === "text" ? first.text : "";
         if (!NOTICE_PREFIXES.some((prefix) => text.startsWith(prefix))) continue;
-        await bb.sdk.threads.queuedMessages.delete({ threadId, queuedMessageId: message.id });
+        try {
+          await bb.sdk.threads.queuedMessages.delete({ threadId, queuedMessageId: message.id });
+        } catch (error) {
+          bb.log.warn(`withdrawing board notice ${message.id} queued for ${threadId} failed: ${errorText(error)}`);
+        }
       }
     } catch (error) {
-      bb.log.warn(`withdrawing board notices queued for ${threadId} failed: ${errorText(error)}`);
+      bb.log.warn(`reading the queue of ${threadId} to withdraw board notices failed: ${errorText(error)}`);
     }
   }
 
