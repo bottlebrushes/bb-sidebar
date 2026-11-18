@@ -2,7 +2,7 @@
 // board draws. Pure, so the ordering rules are tested without React.
 import type { PluginSidebarThread } from "@get-bb/plugin-sdk/app";
 import type { BoardCard, BoardColumn, BoardRelation, BoardSnapshot, ColumnCategory } from "./contract";
-import { threadDisplayTitle } from "../inbox";
+import { filterByProjects, threadDisplayTitle } from "../inbox";
 import { isThreadWorking } from "../lifecycle";
 
 const CATEGORY_RANK: Record<ColumnCategory, number> = {
@@ -70,8 +70,14 @@ export interface LayoutColumn {
 
 interface LayoutInput {
   snapshot: BoardSnapshot;
-  /** Threads with bb-sidebar's "Sort under" project already applied. */
+  /**
+   * Every thread, with bb-sidebar's "Sort under" project already applied. A
+   * card's thread is looked up here whatever its project: work on a
+   * trace-frontend card often runs in a trace-backend thread.
+   */
   threads: readonly PluginSidebarThread[];
+  /** Projects whose threads without a card get one; empty for every project. */
+  threadProjectIds?: readonly string[];
   /** A project id, or null for every project. */
   projectId: string | null;
   projectNames: Readonly<Record<string, string>>;
@@ -279,7 +285,8 @@ export function orderColumn(
  */
 export function buildLayout(input: LayoutInput): BoardLayout {
   const { snapshot, threads, projectId } = input;
-  const allCards = [...snapshot.cards, ...virtualCards(snapshot, threads, input.isSettled, input.now)];
+  const cardless = filterByProjects(threads, input.threadProjectIds ?? []);
+  const allCards = [...snapshot.cards, ...virtualCards(snapshot, cardless, input.isSettled, input.now)];
   const cardsById = new Map(allCards.map((card) => [card.id, card]));
   const threadsById = new Map(threads.map((thread) => [thread.id, thread]));
   const columnsById = new Map(snapshot.columns.map((column) => [column.id, column]));
