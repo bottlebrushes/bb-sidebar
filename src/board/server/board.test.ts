@@ -556,6 +556,7 @@ describe("board RPC and agent tools", () => {
             },
           };
         if (query.includes("children(")) return { issue: { children: { nodes: [] } } };
+        if (query.includes("issue(id: $id) { state")) return { issue: { state: { id: "s_done" } } };
         if (query.includes("issueUpdate"))
           return {
             issueUpdate: {

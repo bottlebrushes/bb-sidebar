@@ -16,6 +16,7 @@ import {
   type BoardSnapshot,
   type ColumnCategory,
 } from "../contract";
+import { createCardNotices } from "./card-notices";
 import { checkDoneMove, type ChildCardState } from "./done-guard";
 import {
   createIssue,
@@ -135,6 +136,7 @@ export function createBoardServer(bb: BbPluginApi, db: Database.Database): Board
   };
   const linear = createLinearClient(apiKey);
   const store = new BoardStore(db);
+  const notices = createCardNotices(bb, store, linear);
   let viewer: { id: string; name: string } | null = null;
   /** The key's Linear user, fetched once; null while unknown or without a key. */
   async function linearViewer(): Promise<{ id: string; name: string } | null> {
@@ -149,98 +151,6 @@ export function createBoardServer(bb: BbPluginApi, db: Database.Database): Board
   const branchByEnvironment = new Map<string, string | null>();
 
   const publish = () => bb.realtime.publish(BOARD_CHANNEL, {});
-  type BoardThread = Awaited<ReturnType<typeof bb.sdk.threads.get>>;
-  const isThreadWorking = (thread: BoardThread) =>
-    thread.status === "active" ||
-    thread.status === "pending" ||
-    thread.status === "starting" ||
-    thread.status === "stopping" ||
-    ("hasPendingInteraction" in thread && thread.hasPendingInteraction) ||
-    !["idle", "error"].includes(thread.runtime.displayStatus);
-
-  async function sendBoardMessage(threadId: string, text: string) {
-    await bb.sdk.threads.send({
-      threadId,
-      input: [{ type: "text", text, mentions: [] }],
-      mode: "queue-if-active",
-    });
-  }
-  async function archiveShippedCard(card: CardRow, thread?: BoardThread) {
-    const threadId = card.thread_id;
-    if (!threadId) return;
-    const current = thread ?? (await bb.sdk.threads.get({ threadId }));
-    if (current.archivedAt !== null) {
-      store.clearPendingArchive(card.id);
-      return;
-    }
-    store.ensurePendingArchive(card.id, threadId);
-    const pending = store.pendingArchive(card.id);
-    if (pending?.notified_at === null) {
-      const column = store.column(card.column_id);
-      const identifier = card.linear_identifier ?? card.id;
-      try {
-        await sendBoardMessage(
-          threadId,
-          `[board] ${identifier} is in ${column.name}: shipped. This thread is archived now.`,
-        );
-        store.markArchiveNotified(card.id);
-      } catch (error) {
-        bb.log.warn(
-          `telling ${threadId} about shipped ${identifier} failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    }
-    const latest = await bb.sdk.threads.get({ threadId }).catch(() => current);
-    if (isThreadWorking(latest)) return;
-    if (store.pendingArchive(card.id)?.requested_at !== null) return;
-    try {
-      await bb.sdk.threads.archive({ threadId });
-      store.markArchiveRequested(card.id);
-    } catch (error) {
-      bb.log.warn(
-        `archiving shipped thread ${threadId} failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-  }
-
-  async function notifyCardMove(card: CardRow, from: ColumnRow, to: ColumnRow, byThreadId: string | null = null) {
-    if (from.id === to.id || !card.thread_id) return;
-    const threadId = card.thread_id;
-    let thread: BoardThread;
-    try {
-      thread = await bb.sdk.threads.get({ threadId });
-    } catch {
-      return;
-    }
-    if (thread.archivedAt !== null) return;
-    const identifier = card.linear_identifier ?? card.id;
-    if (byThreadId !== threadId) {
-      const url = card.linear_url ? `\n${card.linear_url}` : "";
-      try {
-        await sendBoardMessage(
-          threadId,
-          `[board] ${identifier} "${card.title}" moved from ${from.name} to ${to.name}.${url}`,
-        );
-      } catch (error) {
-        bb.log.warn(
-          `telling ${threadId} about ${identifier} moving failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    }
-    if (store.isShipped(card.project_id, to)) {
-      await archiveShippedCard(card, thread);
-    } else {
-      store.clearPendingArchive(card.id);
-    }
-  }
-
-  async function archiveShippedCards(projectId: string) {
-    for (const card of store.projectCards(projectId)) {
-      const column = store.column(card.column_id);
-      if (store.isShipped(projectId, column) && card.thread_id) await archiveShippedCard(card);
-    }
-  }
-
   async function projectIds(): Promise<string[]> {
     return (await bb.sdk.projects.list({ includePersonal: true })).map((project) => project.id);
   }
@@ -407,11 +317,7 @@ export function createBoardServer(bb: BbPluginApi, db: Database.Database): Board
         "Finish or cancel those child cards (or have their threads do it), then move this card again.",
       ].join("\n");
       try {
-        await bb.sdk.threads.send({
-          threadId: owner,
-          input: [{ type: "text", text, mentions: [] }],
-          mode: "queue-if-active",
-        });
+        await notices.sendNotice(owner, text);
         store.recordDoneRefusal(card.id, refusal.openKey);
       } catch (error) {
         bb.log.warn(
@@ -442,7 +348,7 @@ export function createBoardServer(bb: BbPluginApi, db: Database.Database): Board
     const moved = store.updateCard(card.id, { column_id: target.id, position });
     if (target.category === "completed") store.clearDoneRefusal(card.id);
     publish();
-    await notifyCardMove(moved, store.column(card.column_id), target, byThreadId);
+    await notices.notifyCardMove(moved, store.column(card.column_id), target, byThreadId);
     return store.toCard(moved);
   }
 
@@ -573,6 +479,7 @@ export function createBoardServer(bb: BbPluginApi, db: Database.Database): Board
       if (other && other.id !== card.id) throw new BoardError(`That thread is already linked to "${other.title}"`);
     }
     const updated = store.updateCard(card.id, { thread_id: input.threadId });
+    if (card.thread_id && card.thread_id !== input.threadId) await notices.withdrawNotices(card.thread_id);
     if (card.linear_identifier) {
       if (card.thread_id && card.thread_id !== input.threadId)
         await clearLinearCard(card.thread_id, card.linear_identifier);
@@ -865,9 +772,12 @@ export function createBoardServer(bb: BbPluginApi, db: Database.Database): Board
   // An archived (or deleted) thread no longer works on its card: the Linear
   // card stays where it is, but without the thread, so it reads "Needs agent"
   // and opens its card page. The thread's Linear Card chip keeps the issue, so
-  // unarchiving the thread relinks it the next time it works.
+  // unarchiving the thread relinks it the next time it works. Board notices
+  // still queued for an archived thread are withdrawn: delivered after an
+  // unarchive, they would state a column the card has since left.
   for (const event of ["thread.archived", "thread.deleted"] as const) {
     bb.events.on(event, ({ thread }) => {
+      if (event === "thread.archived") void notices.withdrawNotices(thread.id);
       const card = store.cardByThread(thread.id);
       if (!card?.linear_identifier) return;
       store.clearPendingArchive(card.id);
@@ -893,7 +803,7 @@ export function createBoardServer(bb: BbPluginApi, db: Database.Database): Board
       const card = store.cardByThread(thread.id);
       if (!card) return;
       const column = store.column(card.column_id);
-      if (store.isShipped(card.project_id, column)) await archiveShippedCard(card, thread);
+      if (store.isShipped(card.project_id, column)) await notices.archiveShippedCard(card, thread);
     })().catch((error: unknown) => {
       bb.log.warn(
         `archiving shipped card for ${thread.id} failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -901,7 +811,23 @@ export function createBoardServer(bb: BbPluginApi, db: Database.Database): Board
     });
   });
 
-  async function syncProject(projectId: string, forceFull = false) {
+  // One sync per project at a time: an older Linear read applied after a newer
+  // one would put cards back in columns Linear has left.
+  const syncRuns = new Map<string, Promise<void>>();
+  function syncProject(projectId: string, forceFull = false): Promise<void> {
+    const run = (syncRuns.get(projectId) ?? Promise.resolve()).then(() => syncProjectNow(projectId, forceFull));
+    const settled = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    syncRuns.set(projectId, settled);
+    void settled.then(() => {
+      if (syncRuns.get(projectId) === settled) syncRuns.delete(projectId);
+    });
+    return run;
+  }
+
+  async function syncProjectNow(projectId: string, forceFull: boolean) {
     const project = store.project(projectId);
     if (!store.isLinked(project)) return;
     try {
@@ -911,10 +837,11 @@ export function createBoardServer(bb: BbPluginApi, db: Database.Database): Board
         forceFull,
         onColumnChange: (change) => transitions.push(change),
       });
-      for (const transition of transitions) await notifyCardMove(transition.card, transition.from, transition.to);
+      for (const transition of transitions)
+        await notices.notifyCardMove(transition.card, transition.from, transition.to);
       if (result.full) {
         await reconcileAllThreads();
-        await archiveShippedCards(projectId);
+        await notices.archiveShippedCards(projectId);
       }
       if (result.full || result.applied > 0 || result.removed > 0 || project.sync_error !== null) publish();
     } catch (error) {

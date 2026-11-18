@@ -315,6 +315,16 @@ export async function fetchChildIssues(client: LinearClient, issueId: string) {
   }));
 }
 
+/** An issue's workflow state id, read fresh from Linear. */
+export async function fetchIssueStateId(client: LinearClient, issueId: string): Promise<string> {
+  const data = await client.request(
+    `query($id: String!) { issue(id: $id) { state { id } } }`,
+    { id: issueId },
+    z.object({ issue: z.object({ state: z.object({ id: z.string() }) }) }),
+  );
+  return data.issue.state.id;
+}
+
 export async function createIssue(client: LinearClient, input: Record<string, unknown>) {
   const data = await client.request(
     `mutation($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { id identifier url sortOrder } } }`,
