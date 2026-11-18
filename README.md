@@ -37,6 +37,7 @@ A stable thread list for [bb](https://github.com/get-bb/bb). Threads stay where 
 - A card cannot move to a Done (completed) column while any of its sub-items is not Done or Canceled, whether the move comes from dragging, the CLI, or an agent tool. The refusal lists each open sub-item with its column and thread; when someone other than the card's own thread tried the move, that thread is told once per set of open sub-items. Moving to Canceled is never blocked, and a parent Linear already has as Done is left alone
 - Cards show the thread working on them, including a parent card's thread for its sub-items, or **Needs agent**
 - Board filters: by Linear assignee (My cards, Everyone, Unassigned, or one person) and by column, and sorting by priority; Linear's Blocked column starts hidden
+- Pinned projects first: with several projects on the board, every column lists the cards of the projects pinned above the list first, in pin order, then the rest
 - `bb sidebar board list | show | create | move | block | unblock | parent | duplicate | link | linear | sync` and `board_*` agent tools, so agents can move their own card, block it on another, or file sub-items
 - `bb sidebar settle` from a working thread (an agent settling itself) settles it when the turn ends
 - A machine-wait status on cards and rows while a thread's devbox is paused or resuming, and **Stuck** when queued messages stop starting
