@@ -413,6 +413,18 @@ describe("board RPC and agent tools", () => {
       ),
     ).resolves.toMatchObject({ isError: true });
   });
+  it("rejects unknown board tool fields and empty card updates", async () => {
+    const { harness } = await load();
+    const context = { threadId: "thr_1", projectId: "p" };
+
+    await expect(
+      harness.behavior.callAgentTool("board_update_card", { status: "In Progress" }, context),
+    ).rejects.toThrow('Unrecognized key: "status"');
+    await expect(harness.behavior.callAgentTool("board_update_card", {}, context)).resolves.toMatchObject({
+      isError: true,
+      content: [{ text: "Provide at least one card change: column, title, description, priority, or linearProject" }],
+    });
+  });
 
   it("lets an agent claim an existing Linear card, replacing only a bare placeholder and never another thread's card", async () => {
     let issues = 0;
