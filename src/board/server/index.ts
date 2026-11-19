@@ -1148,7 +1148,9 @@ function registerAgentTools(
     name: "board_list_cards",
     description:
       "List the cards on the bb board for your project (or a column of it), with status, blockers and parents.",
-    parameters: z.object({ column: z.string().optional().describe('Only cards in this column, e.g. "In Progress"') }),
+    parameters: z
+      .object({ column: z.string().optional().describe('Only cards in this column, e.g. "In Progress"') })
+      .strict(),
     async execute({ column }, ctx) {
       try {
         const projectId = await threadProjectId(ctx.threadId);
@@ -1168,7 +1170,7 @@ function registerAgentTools(
   bb.agents.registerTool({
     name: "board_get_card",
     description: "Show one bb board card. Defaults to the card of your own thread.",
-    parameters: z.object({ card: cardRef.default("this") }),
+    parameters: z.object({ card: cardRef.default("this") }).strict(),
     async execute({ card }, ctx) {
       try {
         return describeCard(await resolveCard(card, ctx));
@@ -1182,18 +1184,25 @@ function registerAgentTools(
     name: "board_create_card",
     description:
       "Create a card on the bb board in your project. In a project linked to Linear this creates a Linear issue.",
-    parameters: z.object({
-      title: z.string().trim().min(1).max(500),
-      description: z.string().max(50_000).optional(),
-      column: z.string().optional().describe("Column name; defaults to the first not-started column"),
-      parent: cardRef
-        .optional()
-        .describe(
-          'Make the new card a sub-item of this card. Use "this" when the work is part of your own task: the board then shows it as handled by your thread instead of needing its own agent',
-        ),
-      blockedBy: z.array(cardRef).max(20).optional().describe("Cards the new card waits on"),
-      linearProject: z.string().trim().min(1).optional().describe("Linear project (epic) name to put the new card in"),
-    }),
+    parameters: z
+      .object({
+        title: z.string().trim().min(1).max(500),
+        description: z.string().max(50_000).optional(),
+        column: z.string().optional().describe("Column name; defaults to the first not-started column"),
+        parent: cardRef
+          .optional()
+          .describe(
+            'Make the new card a sub-item of this card. Use "this" when the work is part of your own task: the board then shows it as handled by your thread instead of needing its own agent',
+          ),
+        blockedBy: z.array(cardRef).max(20).optional().describe("Cards the new card waits on"),
+        linearProject: z
+          .string()
+          .trim()
+          .min(1)
+          .optional()
+          .describe("Linear project (epic) name to put the new card in"),
+      })
+      .strict(),
     async execute(input, ctx) {
       try {
         const projectId = await threadProjectId(ctx.threadId);
@@ -1222,22 +1231,28 @@ function registerAgentTools(
   bb.agents.registerTool({
     name: "board_update_card",
     description:
-      "Change a bb board card: move it to another column (status), edit its title, description or priority, or put it in a Linear project (the epic it belongs to). Defaults to your own thread's card. A card cannot move to a Done (completed) column while any of its child cards (sub-items) is not Done or Canceled: the call fails and lists each open child with its thread, so finish or cancel those first.",
-    parameters: z.object({
-      card: cardRef.default("this"),
-      column: z.string().optional().describe('Target column name, e.g. "In Review" or "Done"'),
-      title: z.string().trim().min(1).max(500).optional(),
-      description: z.string().max(50_000).optional(),
-      priority: z.number().int().min(0).max(4).optional().describe("0 none, 1 urgent, 2 high, 3 medium, 4 low"),
-      linearProject: z
-        .string()
-        .trim()
-        .min(1)
-        .optional()
-        .describe('Linear project (epic) name to put the card in, or "-" to take it out of its project'),
-    }),
+      "Change a bb board card: move it to another column (the `column` field), edit its title, description or priority, or put it in a Linear project (the epic it belongs to). Defaults to your own thread's card. A card cannot move to a Done (completed) column while any of its child cards (sub-items) is not Done or Canceled: the call fails and lists each open child with its thread, so finish or cancel those first.",
+    parameters: z
+      .object({
+        card: cardRef.default("this"),
+        column: z.string().optional().describe('Target column name, e.g. "In Review" or "Done"'),
+        title: z.string().trim().min(1).max(500).optional(),
+        description: z.string().max(50_000).optional(),
+        priority: z.number().int().min(0).max(4).optional().describe("0 none, 1 urgent, 2 high, 3 medium, 4 low"),
+        linearProject: z
+          .string()
+          .trim()
+          .min(1)
+          .optional()
+          .describe('Linear project (epic) name to put the card in, or "-" to take it out of its project'),
+      })
+      .strict(),
     async execute(input, ctx) {
       try {
+        if (Object.entries(input).every(([key, value]) => key === "card" || value === undefined))
+          throw new BoardError(
+            "Provide at least one card change: column, title, description, priority, or linearProject",
+          );
         const card = await resolveCard(input.card, ctx);
         if (input.title !== undefined || input.description !== undefined || input.priority !== undefined) {
           await handlers.updateCard({
@@ -1261,16 +1276,18 @@ function registerAgentTools(
     name: "board_set_relation",
     description:
       "Mark a bb board card as blocked by another card (or remove that), make it a sub-item of another card (parent), or mark it a duplicate of a main card. Defaults to your own thread's card.",
-    parameters: z.object({
-      card: cardRef.default("this"),
-      blockedBy: cardRef.optional().describe("Add: the card this one waits on"),
-      unblockedBy: cardRef.optional().describe("Remove a blocker"),
-      parent: z.union([cardRef, z.null()]).optional().describe("Parent card, or null to clear"),
-      duplicateOf: z
-        .union([cardRef, z.null()])
-        .optional()
-        .describe("The main card this one duplicates, or null to clear"),
-    }),
+    parameters: z
+      .object({
+        card: cardRef.default("this"),
+        blockedBy: cardRef.optional().describe("Add: the card this one waits on"),
+        unblockedBy: cardRef.optional().describe("Remove a blocker"),
+        parent: z.union([cardRef, z.null()]).optional().describe("Parent card, or null to clear"),
+        duplicateOf: z
+          .union([cardRef, z.null()])
+          .optional()
+          .describe("The main card this one duplicates, or null to clear"),
+      })
+      .strict(),
     async execute(input, ctx) {
       try {
         const card = await resolveCard(input.card, ctx);
@@ -1311,7 +1328,9 @@ function registerAgentTools(
     name: "board_link_card",
     description:
       'Claim an existing bb board card (e.g. a Linear issue TRA-123) as your own thread\'s card, so "this" refers to it and the thread header shows it. Fails when another thread already holds the card.',
-    parameters: z.object({ card: z.string().trim().min(1).describe("Card id or Linear identifier, e.g. TRA-123") }),
+    parameters: z
+      .object({ card: z.string().trim().min(1).describe("Card id or Linear identifier, e.g. TRA-123") })
+      .strict(),
     async execute(input, ctx) {
       try {
         if (input.card === "this") throw new BoardError('Name the card to claim (an id or e.g. TRA-123), not "this"');
